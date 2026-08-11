@@ -16,14 +16,16 @@ log_file: logs/stockbot.log
 data:
   # "synthetic" (deterministic dev/test data, no API key needed),
   # "csv" (reads data_files/{SYMBOL}.csv), or "alpaca" (real paper market data).
-  provider: synthetic
+  # alpaca requires ALPACA_API_KEY / ALPACA_SECRET_KEY in .env - switch
+  # back to "synthetic" any time for a zero-setup, offline, reproducible run.
+  provider: alpaca
   csv_dir: data_files
   timeframe: 1Day
   history_lookback_days: 180
 
 news:
   # "none" (default - the strategy works fine without news) or "alpaca".
-  provider: none
+  provider: alpaca
 
 strategy:
   name: technical

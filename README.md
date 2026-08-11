@@ -100,11 +100,13 @@ weights, or risk limits.
 pytest
 ```
 
-77 tests across indicators, scoring, portfolio accounting, risk limits,
+79 tests across indicators, scoring, portfolio accounting, risk limits,
 execution (slippage/commission), backtesting (including an explicit
-no-look-ahead check), data validation/resilience, and the dashboard API.
-None are placeholders - each asserts a specific numeric or behavioral
-outcome.
+no-look-ahead check), data validation/resilience, the dashboard API, and
+Alpaca credential handling. None are placeholders - each asserts a
+specific numeric or behavioral outcome. (Tests never hit the network -
+they exercise the synthetic provider and mock credentials, not live
+Alpaca calls.)
 
 ## Configuration
 
@@ -134,7 +136,16 @@ limits, execution costs, database URL, polling interval. Secrets
   persisted with enough detail (full indicator values, score breakdown,
   reason string) to reconstruct *why* a trade did or didn't happen.
 - Synthetic data provider (seeded, reproducible, no API key) plus CSV and
-  Alpaca provider implementations behind the same interface.
+  **Alpaca** providers behind the same interface. Alpaca is now the
+  configured default and has been verified live (real historical bars,
+  a real latest-trade snapshot, and real news) against a free paper
+  account - not just written and assumed to work. One real bug this
+  caught: free/paper accounts only have `IEX` feed access, not the
+  full-market `SIP` feed, which 403s on recent data without a paid
+  subscription; both `get_historical_candles` and `get_snapshot` now
+  request `DataFeed.IEX` explicitly. Switch `data.provider` back to
+  `synthetic` any time for a zero-setup, offline, reproducible run
+  (e.g. for the tests, which never hit the network).
 - News is fully optional (`NullNewsProvider` by default); the scoring
   engine redistributes sentiment's weight across the other components
   when no news is available rather than silently zeroing part of the

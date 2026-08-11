@@ -29,14 +29,6 @@ from data.base import MarketDataError, MarketDataProvider, NewsDataProvider
 
 logger = get_logger("data.alpaca")
 
-_TIMEFRAME_MAP = {
-    "1Min": "Min",
-    "5Min": "5Min",
-    "15Min": "15Min",
-    "1Hour": "Hour",
-    "1Day": "Day",
-}
-
 
 def _get_credentials() -> tuple[str, str]:
     api_key = os.environ.get("ALPACA_API_KEY")
@@ -66,6 +58,7 @@ class AlpacaMarketDataProvider(MarketDataProvider):
     def get_historical_candles(
         self, symbol: str, start: datetime, end: datetime, timeframe: str = "1Day"
     ) -> List[Candle]:
+        from alpaca.data.enums import DataFeed
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
 
@@ -80,8 +73,17 @@ class AlpacaMarketDataProvider(MarketDataProvider):
             raise MarketDataError(f"unsupported timeframe: {timeframe!r}")
 
         try:
+            # Free/paper accounts only have IEX feed access, not the full-
+            # market SIP feed (which 403s on recent data without a paid
+            # subscription). IEX is a real, live exchange feed - just a
+            # single venue's view rather than a consolidated tape - which
+            # is a fine tradeoff for a paper-trading research bot.
             request = StockBarsRequest(
-                symbol_or_symbols=symbol, timeframe=tf_map[timeframe], start=start, end=end
+                symbol_or_symbols=symbol,
+                timeframe=tf_map[timeframe],
+                start=start,
+                end=end,
+                feed=DataFeed.IEX,
             )
             bars = self._client.get_stock_bars(request)
         except Exception as exc:  # network/auth/rate-limit failures
@@ -104,10 +106,11 @@ class AlpacaMarketDataProvider(MarketDataProvider):
         return candles
 
     def get_snapshot(self, symbol: str) -> MarketSnapshot:
+        from alpaca.data.enums import DataFeed
         from alpaca.data.requests import StockLatestTradeRequest
 
         try:
-            request = StockLatestTradeRequest(symbol_or_symbols=symbol)
+            request = StockLatestTradeRequest(symbol_or_symbols=symbol, feed=DataFeed.IEX)
             trade = self._client.get_stock_latest_trade(request)[symbol]
         except Exception as exc:
             raise MarketDataError(f"Alpaca latest trade request failed for {symbol}: {exc}") from exc

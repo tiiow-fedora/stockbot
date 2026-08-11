@@ -148,3 +148,23 @@ def test_orchestrator_skips_symbol_on_outage_without_crashing():
     assert "AAPL" in prices
     assert "MSFT" not in prices
     assert errors == [("MSFT", "simulated outage")]
+
+
+# -- Alpaca provider: credential handling (no network calls) -------------------
+
+def test_alpaca_market_data_provider_requires_credentials(monkeypatch):
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    from data.providers.alpaca import AlpacaMarketDataProvider
+
+    with pytest.raises(MarketDataError, match="ALPACA_API_KEY"):
+        AlpacaMarketDataProvider()
+
+
+def test_alpaca_news_provider_requires_credentials(monkeypatch):
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    from data.providers.alpaca import AlpacaNewsProvider
+
+    with pytest.raises(MarketDataError, match="ALPACA_API_KEY"):
+        AlpacaNewsProvider()
