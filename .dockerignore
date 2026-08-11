@@ -1,0 +1,26 @@
+# Secrets - never bake these into an image layer. Real credentials reach
+# the container at runtime via docker-compose's `env_file:`, which is
+# completely independent of what COPY puts inside the image.
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Data / DB / logs (generated at runtime, not source)
+*.db
+*.sqlite3
+logs/
+data_files/*.csv
+
+# VCS / OS / IDE
+.git/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
