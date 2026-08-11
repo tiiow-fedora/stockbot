@@ -22,6 +22,12 @@ data:
   csv_dir: data_files
   timeframe: 1Day
   history_lookback_days: 180
+  # "auto" (alpaca's real market hours+holidays if provider: alpaca, else
+  # always_open), "always_open", "us_equity" (Mon-Fri 9:30-16:00 ET, no
+  # holiday awareness, no network), or "alpaca" (exact, needs credentials).
+  # The live loop (`main.py run`) uses this to skip trading while the
+  # market is closed instead of blindly polling/filling at a stale price.
+  market_calendar: auto
 
 news:
   # "none" (default - the strategy works fine without news) or "alpaca".

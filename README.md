@@ -27,7 +27,7 @@ Every stage only knows about the standardized types in [core/models.py](core/mod
 stockbot/
 ├── config/           # config.yaml (non-secret settings)
 ├── core/             # models.py (shared types), config.py, logging.py
-├── data/             # MarketDataProvider / NewsDataProvider interfaces + providers/
+├── data/             # MarketDataProvider / NewsDataProvider interfaces, market_calendar.py + providers/
 │   └── providers/    # synthetic (dev), csv (backtesting), alpaca (real paper data)
 ├── analysis/         # indicators.py (SMA/EMA/RSI/MACD/...), sentiment.py (lexicon + optional LLM)
 ├── strategy/         # base.py interface, scoring.py, technical.py, mean_reversion.py, registry.py
@@ -107,16 +107,18 @@ weights, or risk limits.
 pytest
 ```
 
-118 tests across indicators, scoring, portfolio accounting, risk limits,
-execution (slippage/commission, including the Alpaca mirror executor -
-mocked, not live), backtesting (including an explicit no-look-ahead
-check and optional-news bounds), data validation/resilience, the
-dashboard API, Alpaca/Anthropic credential handling, sentiment scoring,
-both strategies (including a direct check that they read the same
-signal in opposite directions), strategy comparison, and parameter grid
-search. None are placeholders - each asserts a specific numeric or
-behavioral outcome. (Tests never hit the network - they exercise the
-synthetic provider and mock credentials/clients, not live API calls.)
+140 tests across indicators, scoring, portfolio accounting, risk limits,
+execution (slippage/commission, the Alpaca mirror executor, and the
+live-loop market-hours heartbeat - all mocked, not live), backtesting
+(including an explicit no-look-ahead check and optional-news bounds),
+data validation/resilience, the dashboard API, Alpaca/Anthropic
+credential handling, sentiment scoring, both strategies (including a
+direct check that they read the same signal in opposite directions),
+strategy comparison, parameter grid search, and the market calendar
+(deterministic date math, no network). None are placeholders - each
+asserts a specific numeric or behavioral outcome. (Tests never hit the
+network - they exercise the synthetic provider and mock credentials/
+clients, not live API calls.)
 
 ## Configuration
 
@@ -207,6 +209,22 @@ limits, execution costs, database URL, polling interval. Secrets
   fails for any reason, it's logged and swallowed; the local fill that
   already happened is never affected, so the two ledgers can drift out of
   sync over time - that's an accepted tradeoff for a cosmetic feature.
+- **Market-hours awareness** (`data/market_calendar.py`,
+  `data.market_calendar: auto`): the live loop (`main.py run`) now checks
+  whether the market is open before running the strategy/order pipeline
+  at all - it used to poll blindly around the clock, which meant the
+  local paper simulator would happily fill orders instantly at a stale
+  price even at 2am or on a weekend (Alpaca's own paper account correctly
+  queues orders until the next open; ours didn't model that at all until
+  now). `AlpacaMarketCalendar` uses Alpaca's real clock (exact hours,
+  real holidays); `USEquityMarketCalendar` is a deterministic offline
+  fallback (Mon-Fri 9:30-16:00 ET, no holiday awareness) for when you're
+  not using Alpaca; `AlwaysOpenCalendar` is the default for synthetic/CSV
+  data. While the market's closed, the loop still writes a heartbeat
+  portfolio snapshot every 30 min (so the dashboard shows "running," not
+  "stale," across a long overnight/weekend gap) but places no trades.
+  Verified live against the real closed market: correctly logged "Market
+  closed - next open 2026-08-12T09:30:00-04:00" and skipped trading.
 
 ## Limitations / not yet built
 

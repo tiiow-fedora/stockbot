@@ -73,6 +73,11 @@ class DataConfig(BaseModel):
     csv_dir: str = "data_files"
     timeframe: str = "1Day"
     history_lookback_days: int = 180
+    # "auto" (alpaca calendar if provider: alpaca, else always_open),
+    # "always_open" (synthetic/CSV or a 24/7 classroom platform),
+    # "us_equity" (deterministic Mon-Fri 9:30-16:00 ET, no holidays, no
+    # network), or "alpaca" (exact hours + real holidays, needs credentials).
+    market_calendar: str = "auto"
 
 
 class NewsConfig(BaseModel):

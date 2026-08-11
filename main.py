@@ -45,6 +45,12 @@ from strategy.registry import STRATEGY_BUILDERS, build_strategy_by_name
 
 logger = get_logger("main")
 
+# While the market is closed, re-check at most this often rather than
+# sleeping straight through to the next open - keeps the dashboard's
+# "last update" fresh and the process visibly alive over a long
+# weekend/holiday instead of going silent for 60+ hours at a stretch.
+MAX_CLOSED_MARKET_SLEEP_SECONDS = 1800
+
 
 # --------------------------------------------------------------------------
 # Factories (the dependency-injection seam)
@@ -84,6 +90,15 @@ def build_executor(config: AppConfig) -> OrderExecutor:
     raise ValueError(f"unknown execution mode: {config.execution.mode!r}")
 
 
+def build_market_calendar(config: AppConfig):
+    from data.market_calendar import build_market_calendar as _build_calendar
+
+    name = config.data.market_calendar
+    if name == "auto":
+        name = "alpaca" if config.data.provider == "alpaca" else "always_open"
+    return _build_calendar(name)
+
+
 # --------------------------------------------------------------------------
 # Live (paper) trading loop
 # --------------------------------------------------------------------------
@@ -100,17 +115,25 @@ def run_live_loop(config: AppConfig) -> None:
     risk_manager = RiskManager(config.risk)
     executor = build_executor(config)
     portfolio = Portfolio(config.starting_balance)
+    calendar = build_market_calendar(config)
 
     logger.info(
-        "StockBot starting: symbols=%s provider=%s execution_mode=%s starting_balance=%.2f",
+        "StockBot starting: symbols=%s provider=%s execution_mode=%s starting_balance=%.2f market_calendar=%s",
         config.symbols,
         config.data.provider,
         config.execution.mode,
         config.starting_balance,
+        type(calendar).__name__,
     )
 
     try:
         while True:
+            now = datetime.now(timezone.utc)
+            if not calendar.is_open(now):
+                sleep_seconds = _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now)
+                time.sleep(sleep_seconds)
+                continue
+
             _run_cycle(
                 config, db, provider, market_data, news_provider, sentiment_scorer,
                 strategy, risk_manager, executor, portfolio,
@@ -118,6 +141,37 @@ def run_live_loop(config: AppConfig) -> None:
             time.sleep(config.polling_interval_seconds)
     except KeyboardInterrupt:
         logger.info("StockBot stopped by user.")
+
+
+def _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now: datetime) -> float:
+    """The market is closed: mark the portfolio to last-known prices (so
+    the dashboard shows "running," not "stale," across a long
+    overnight/weekend gap) and skip the strategy/risk/order pipeline
+    entirely. The local paper simulator has no concept of trading hours
+    on its own - if we ran the full pipeline here, it would happily fill
+    orders instantly at a stale price, which a real trading session never
+    would. Returns how many seconds to sleep before checking again."""
+    prices: Dict[str, float] = {}
+    for symbol in config.symbols:
+        try:
+            snapshot = market_data.get_snapshot(symbol)
+            prices[symbol] = snapshot.price
+        except Exception as exc:
+            logger.warning("Market data unavailable for %s while closed: %s", symbol, exc)
+
+    if prices:
+        db.save_portfolio_snapshot(portfolio.snapshot(now, prices))
+
+    next_open = calendar.next_open(now)
+    seconds_until_open = max(1.0, (next_open - now).total_seconds())
+    sleep_seconds = min(seconds_until_open, MAX_CLOSED_MARKET_SLEEP_SECONDS)
+    logger.info(
+        "Market closed - next open %s (in %.0f min). No trading; rechecking in %.0f min.",
+        next_open.isoformat(),
+        seconds_until_open / 60,
+        sleep_seconds / 60,
+    )
+    return sleep_seconds
 
 
 def _run_cycle(
