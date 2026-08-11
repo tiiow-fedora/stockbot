@@ -26,7 +26,12 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
 )
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+
+from core.logging import get_logger
+
+logger = get_logger("database")
 
 from core.models import (
     Action,
@@ -165,7 +170,17 @@ class DatabaseManager:
         self.Session = sessionmaker(bind=self.engine, future=True)
 
     def init_db(self) -> None:
-        Base.metadata.create_all(self.engine)
+        """create_all()'s "check if it exists, then create" isn't atomic
+        across processes - when the live loop and the dashboard both call
+        this against a fresh Postgres at nearly the same moment (as they
+        do in docker-compose), both can see "doesn't exist yet" and race
+        to CREATE TABLE, and the loser gets a duplicate-object error. The
+        eventual state (tables exist) is what matters, so that specific
+        race is caught and logged rather than left to crash the process."""
+        try:
+            Base.metadata.create_all(self.engine)
+        except (ProgrammingError, OperationalError) as exc:
+            logger.warning("init_db hit a likely concurrent-creation race, continuing: %s", exc)
 
     # -- writers ----------------------------------------------------------
 
