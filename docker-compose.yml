@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stockbot
+      POSTGRES_USER: stockbot
+      POSTGRES_PASSWORD: stockbot
+    volumes:
+      - stockbot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  stockbot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://stockbot:stockbot@postgres:5432/stockbot
+      LOG_LEVEL: INFO
+      # ALPACA_API_KEY / ALPACA_SECRET_KEY: set these in a .env file next to
+      # this compose file (docker compose loads it automatically) if you set
+      # data.provider or news.provider to "alpaca" in config/config.yaml.
+    volumes:
+      - ./config:/app/config:ro
+      - ./data_files:/app/data_files:ro
+      - stockbot_logs:/app/logs
+
+volumes:
+  stockbot_pgdata:
+  stockbot_logs:

@@ -1,0 +1,74 @@
+# StockBot configuration.
+#
+# Everything here is safe to commit - no secrets. API keys go in .env
+# (copy .env.example -> .env, which is gitignored).
+
+symbols:
+  - AAPL
+  - MSFT
+  - NVDA
+
+starting_balance: 100000.0
+polling_interval_seconds: 60
+log_level: INFO
+log_file: logs/stockbot.log
+
+data:
+  # "synthetic" (deterministic dev/test data, no API key needed),
+  # "csv" (reads data_files/{SYMBOL}.csv), or "alpaca" (real paper market data).
+  provider: synthetic
+  csv_dir: data_files
+  timeframe: 1Day
+  history_lookback_days: 180
+
+news:
+  # "none" (default - the strategy works fine without news) or "alpaca".
+  provider: none
+
+strategy:
+  name: technical
+  weights:
+    technical: 0.30
+    momentum: 0.25
+    volume: 0.20
+    risk: 0.15
+    sentiment: 0.10
+  buy_threshold: 0.25
+  sell_threshold: -0.25
+  sma_short_period: 10
+  sma_long_period: 30
+  ema_period: 12
+  rsi_period: 14
+  rsi_overbought: 70.0
+  rsi_oversold: 30.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  momentum_period: 10
+  volume_period: 10
+  volatility_period: 20
+  min_history_bars: 35
+
+risk:
+  max_position_size_pct: 0.20
+  max_portfolio_exposure_pct: 0.80
+  max_open_positions: 8
+  max_trades_per_symbol_per_day: 3
+  stop_loss_pct: 0.08
+  take_profit_pct: 0.20
+  min_cash_reserve_pct: 0.05
+
+execution:
+  # "paper" (simulated fills, updates the portfolio automatically) or
+  # "manual" (logs a suggestion for a human to execute; no auto-fill).
+  mode: paper
+  slippage_bps: 5.0
+  commission_per_trade: 0.0
+  commission_pct: 0.0
+
+database:
+  url: sqlite:///./stockbot.db
+
+backtest:
+  starting_balance: 100000.0
+  warmup_bars: 40
