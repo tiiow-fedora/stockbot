@@ -347,6 +347,108 @@ class DatabaseManager:
                     "price": r.price,
                     "action": r.action,
                     "confidence": r.confidence,
+                    "scores": r.scores,
+                    "reason": r.reason,
+                }
+                for r in rows
+            ]
+
+    def get_latest_decisions(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Most recent decision for each symbol - used for "current signals"."""
+        result: Dict[str, Dict] = {}
+        with self.Session() as session:
+            for symbol in symbols:
+                row = (
+                    session.query(DecisionORM)
+                    .filter(DecisionORM.symbol == symbol)
+                    .order_by(DecisionORM.timestamp.desc())
+                    .first()
+                )
+                if row is None:
+                    continue
+                result[symbol] = {
+                    "symbol": row.symbol,
+                    "timestamp": _as_utc(row.timestamp).isoformat(),
+                    "price": row.price,
+                    "action": row.action,
+                    "confidence": row.confidence,
+                    "scores": row.scores,
+                    "indicators": row.indicators,
+                    "reason": row.reason,
+                }
+        return result
+
+    def get_latest_portfolio_snapshot(self) -> Optional[Dict]:
+        with self.Session() as session:
+            row = session.query(PortfolioSnapshotORM).order_by(PortfolioSnapshotORM.timestamp.desc()).first()
+            if row is None:
+                return None
+            return {
+                "timestamp": _as_utc(row.timestamp).isoformat(),
+                "cash": row.cash,
+                "positions_value": row.positions_value,
+                "total_value": row.total_value,
+                "positions": row.positions,
+            }
+
+    def get_portfolio_history(self, limit: int = 500) -> List[Dict]:
+        """Ascending by time (oldest first) - ready to feed straight into a chart."""
+        with self.Session() as session:
+            rows = (
+                session.query(PortfolioSnapshotORM)
+                .order_by(PortfolioSnapshotORM.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            rows = list(reversed(rows))
+            return [
+                {
+                    "timestamp": _as_utc(r.timestamp).isoformat(),
+                    "cash": r.cash,
+                    "positions_value": r.positions_value,
+                    "total_value": r.total_value,
+                }
+                for r in rows
+            ]
+
+    def get_recent_trades(self, limit: int = 50) -> List[Dict]:
+        """Every filled order (BUY/SELL), most recent first."""
+        with self.Session() as session:
+            rows = (
+                session.query(FillORM, OrderORM)
+                .join(OrderORM, FillORM.order_id == OrderORM.id)
+                .order_by(FillORM.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "timestamp": _as_utc(fill.timestamp).isoformat(),
+                    "symbol": order.symbol,
+                    "side": order.side,
+                    "quantity": fill.quantity,
+                    "price": fill.fill_price,
+                    "commission": fill.commission,
+                    "slippage": fill.slippage,
+                    "reason": order.reason,
+                }
+                for fill, order in rows
+            ]
+
+    def get_recent_risk_rejections(self, limit: int = 50) -> List[Dict]:
+        with self.Session() as session:
+            rows = (
+                session.query(RiskRejectionORM)
+                .order_by(RiskRejectionORM.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "timestamp": _as_utc(r.timestamp).isoformat(),
+                    "symbol": r.symbol,
+                    "side": r.side,
+                    "quantity": r.quantity,
                     "reason": r.reason,
                 }
                 for r in rows

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockBot Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161920;
+    --border: #262b35;
+    --text: #e6e8eb;
+    --muted: #8a919e;
+    --green: #3ecf8e;
+    --red: #f0616d;
+    --amber: #e6b450;
+    --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  #status-badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .status-running { background: rgba(62,207,142,0.15); color: var(--green); }
+  .status-stale { background: rgba(230,180,80,0.15); color: var(--amber); }
+  .status-not_started { background: rgba(138,145,158,0.15); color: var(--muted); }
+
+  main {
+    padding: 20px 24px 60px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .stat-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .panel-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 10px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  .table-scroll { max-height: 320px; overflow-y: auto; overflow-x: auto; }
+
+  .badge { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+  .badge-buy { background: rgba(62,207,142,0.15); color: var(--green); }
+  .badge-sell { background: rgba(240,97,109,0.15); color: var(--red); }
+  .badge-hold { background: rgba(138,145,158,0.15); color: var(--muted); }
+
+  canvas { width: 100%; height: 220px; display: block; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  .reason { color: var(--muted); font-size: 12px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>StockBot</h1>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <span id="meta" style="color:var(--muted); font-size:12px;"></span>
+    <span id="status-badge" class="status-not_started">loading</span>
+  </div>
+</header>
+
+<main>
+  <div class="stat-row">
+    <div class="card"><div class="stat-label">Total Value</div><div class="stat-value" id="stat-total">--</div></div>
+    <div class="card"><div class="stat-label">Cash</div><div class="stat-value" id="stat-cash">--</div></div>
+    <div class="card"><div class="stat-label">Positions Value</div><div class="stat-value" id="stat-positions-value">--</div></div>
+    <div class="card"><div class="stat-label">Total Return</div><div class="stat-value" id="stat-return">--</div></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="panel-title">Portfolio Value History</div>
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="card">
+      <div class="panel-title">Open Positions</div>
+      <div class="table-scroll" id="positions-panel"><div class="empty">No open positions</div></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="panel-title">Current Signals</div>
+      <div class="table-scroll" id="signals-panel"><div class="empty">No signals yet</div></div>
+    </div>
+    <div class="card">
+      <div class="panel-title">Recent Trades</div>
+      <div class="table-scroll" id="trades-panel"><div class="empty">No trades yet</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="panel-title">Recent Strategy Decisions</div>
+    <div class="table-scroll" id="decisions-panel"><div class="empty">No decisions yet</div></div>
+  </div>
+</main>
+
+<script>
+const fmtMoney = (v) => v == null ? "--" : "$" + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtPct = (v) => v == null ? "--" : (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%";
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleString() : "--";
+const pnlClass = (v) => v == null ? "" : (v >= 0 ? "positive" : "negative");
+const actionBadge = (action) => {
+  const cls = action === "BUY" ? "badge-buy" : action === "SELL" ? "badge-sell" : "badge-hold";
+  return `<span class="badge ${cls}">${action}</span>`;
+};
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+function drawChart(history) {
+  const canvas = document.getElementById("chart");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 220 * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = 220;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!history.length) {
+    ctx.fillStyle = "#8a919e";
+    ctx.font = "13px sans-serif";
+    ctx.fillText("No portfolio history yet", 10, h / 2);
+    return;
+  }
+
+  const values = history.map(p => p.total_value);
+  const min = Math.min(...values), max = Math.max(...values);
+  const pad = 10;
+  const range = (max - min) || 1;
+
+  ctx.beginPath();
+  history.forEach((p, i) => {
+    const x = pad + (i / Math.max(1, history.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((p.total_value - min) / range) * (h - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = "#5b8def";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const last = history[history.length - 1].total_value;
+  const first = history[0].total_value;
+  ctx.strokeStyle = last >= first ? "#3ecf8e" : "#f0616d";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  const firstY = h - pad - ((first - min) / range) * (h - pad * 2);
+  ctx.moveTo(pad, firstY);
+  ctx.lineTo(w - pad, firstY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function renderPositions(positions) {
+  const entries = Object.entries(positions || {});
+  const el = document.getElementById("positions-panel");
+  if (!entries.length) { el.innerHTML = '<div class="empty">No open positions</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr></thead><tbody>
+    ${entries.map(([sym, p]) => `<tr>
+      <td>${sym}</td><td>${p.quantity}</td><td>${fmtMoney(p.avg_entry_price)}</td>
+      <td>${fmtMoney(p.market_value)}</td>
+      <td class="${pnlClass(p.unrealized_pnl)}">${fmtMoney(p.unrealized_pnl)}</td>
+    </tr>`).join("")}
+  </tbody></table>`;
+}
+
+function renderSignals(signals) {
+  const entries = Object.values(signals || {});
+  const el = document.getElementById("signals-panel");
+  if (!entries.length) { el.innerHTML = '<div class="empty">No signals yet</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Symbol</th><th>Action</th><th>Confidence</th><th>Price</th><th>As of</th></tr></thead><tbody>
+    ${entries.map(d => `<tr>
+      <td>${d.symbol}</td><td>${actionBadge(d.action)}</td><td>${(d.confidence * 100).toFixed(0)}%</td>
+      <td>${fmtMoney(d.price)}</td><td>${fmtTime(d.timestamp)}</td>
+    </tr>`).join("")}
+  </tbody></table>`;
+}
+
+function renderTrades(trades) {
+  const el = document.getElementById("trades-panel");
+  if (!trades.length) { el.innerHTML = '<div class="empty">No trades yet</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Commission</th></tr></thead><tbody>
+    ${trades.map(t => `<tr>
+      <td>${fmtTime(t.timestamp)}</td><td>${t.symbol}</td><td>${actionBadge(t.side)}</td>
+      <td>${t.quantity}</td><td>${fmtMoney(t.price)}</td><td>${fmtMoney(t.commission)}</td>
+    </tr>`).join("")}
+  </tbody></table>`;
+}
+
+function renderDecisions(decisions) {
+  const el = document.getElementById("decisions-panel");
+  if (!decisions.length) { el.innerHTML = '<div class="empty">No decisions yet</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Time</th><th>Symbol</th><th>Action</th><th>Confidence</th><th>Price</th><th>Reason</th></tr></thead><tbody>
+    ${decisions.map(d => `<tr>
+      <td>${fmtTime(d.timestamp)}</td><td>${d.symbol}</td><td>${actionBadge(d.action)}</td>
+      <td>${(d.confidence * 100).toFixed(0)}%</td><td>${fmtMoney(d.price)}</td>
+      <td class="reason" title="${d.reason}">${d.reason}</td>
+    </tr>`).join("")}
+  </tbody></table>`;
+}
+
+async function refresh() {
+  try {
+    const [status, portfolio, history, signals, trades, decisions] = await Promise.all([
+      getJSON("/api/status"),
+      getJSON("/api/portfolio"),
+      getJSON("/api/portfolio/history"),
+      getJSON("/api/signals"),
+      getJSON("/api/trades?limit=50"),
+      getJSON("/api/decisions?limit=50"),
+    ]);
+
+    const badge = document.getElementById("status-badge");
+    badge.textContent = status.status.replace("_", " ");
+    badge.className = "status-" + status.status;
+    document.getElementById("meta").textContent =
+      `${status.symbols.join(", ")} · ${status.data_provider} data · ${status.execution_mode} execution · last update ${fmtTime(status.last_update)}`;
+
+    document.getElementById("stat-total").textContent = fmtMoney(portfolio.total_value);
+    document.getElementById("stat-cash").textContent = fmtMoney(portfolio.cash);
+    document.getElementById("stat-positions-value").textContent = fmtMoney(portfolio.positions_value);
+    const returnEl = document.getElementById("stat-return");
+    returnEl.textContent = fmtPct(portfolio.return_pct);
+    returnEl.className = "stat-value " + pnlClass(portfolio.return_pct);
+
+    drawChart(history);
+    renderPositions(portfolio.positions);
+    renderSignals(signals);
+    renderTrades(trades);
+    renderDecisions(decisions);
+  } catch (err) {
+    console.error("dashboard refresh failed", err);
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);
+window.addEventListener("resize", refresh);
+</script>
+</body>
+</html>

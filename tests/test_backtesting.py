@@ -4,6 +4,7 @@ import pytest
 
 from backtesting.engine import Backtester, _max_drawdown, _sharpe_ratio
 from core.config import ExecutionConfig, RiskConfig, StrategyConfig
+from database.database import DatabaseManager
 from strategy.scoring import ScoringEngine
 from strategy.technical import TechnicalStrategy
 from tests.conftest import make_candles
@@ -112,3 +113,24 @@ def test_rejected_orders_are_recorded_when_risk_limits_are_tight():
     result = backtester.run("AAPL", candles)
     assert result.num_trades == 0
     assert len(result.rejected_orders) > 0
+
+
+def test_backtest_persists_portfolio_snapshots_when_db_provided(tmp_path):
+    """The dashboard reads portfolio history from the DB - a backtest run
+    with --persist must leave behind a snapshot per bar, not just decisions."""
+    db = DatabaseManager(f"sqlite:///{tmp_path}/test.db")
+    db.init_db()
+    candles = make_candles(n=100, daily_return=0.003)
+    backtester = Backtester(
+        strategy=build_strategy(),
+        risk_config=RiskConfig(),
+        execution_config=ExecutionConfig(),
+        starting_balance=100_000,
+        warmup_bars=40,
+        db=db,
+    )
+    result = backtester.run("AAPL", candles)
+
+    history = db.get_portfolio_history(limit=1000)
+    assert len(history) == len(result.equity_curve)
+    assert history[-1]["total_value"] == pytest.approx(result.ending_balance)

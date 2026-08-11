@@ -180,6 +180,8 @@ class Backtester:
             # 3) Mark to market at the execution bar's close for the equity curve.
             mark_prices = {symbol: execution_bar.close}
             equity_curve.append((execution_bar.timestamp, portfolio.total_value(mark_prices)))
+            if self.db:
+                self.db.save_portfolio_snapshot(portfolio.snapshot(execution_bar.timestamp, mark_prices))
 
             # 4) Buy-and-hold benchmark, using the same executor/costs.
             if not benchmark_entered:

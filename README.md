@@ -35,8 +35,9 @@ stockbot/
 ├── execution/        # base.py interface, paper.py, manual.py, order_builder.py (shared)
 ├── backtesting/       # engine.py: no-lookahead simulation + buy-and-hold benchmark
 ├── database/          # database.py: SQLAlchemy models (SQLite or Postgres)
+├── dashboard/          # app.py: read-only FastAPI dashboard + static/index.html
 ├── tests/             # pytest suite
-├── main.py            # CLI: run / backtest / init-db
+├── main.py            # CLI: run / backtest / init-db / dashboard
 ├── Dockerfile, docker-compose.yml
 └── requirements.txt
 ```
@@ -57,13 +58,21 @@ Two small additions beyond the original tree, both in the spirit of
 
 ## Quick start (local, no Docker)
 
-```bash
-pip install -r requirements.txt
-cp .env.example .env      # only needed if you set provider: alpaca
+Use a virtual environment - this machine has other Python tools installed
+globally (e.g. `spotdl`) with their own pinned dependency versions, and
+`pip install -r requirements.txt` at the system level can silently break
+them (it did once during development; see git history).
 
-python main.py init-db                 # creates stockbot.db (SQLite)
-python main.py backtest --days 365     # backtests all configured symbols against synthetic data
-python main.py run                     # continuous paper-trading loop (Ctrl+C to stop)
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows; use `source .venv/bin/activate` on macOS/Linux
+pip install -r requirements.txt
+cp .env.example .env          # only needed if you set provider: alpaca
+
+python main.py init-db                        # creates stockbot.db (SQLite)
+python main.py backtest --days 365 --persist   # backtests all configured symbols, saves results
+python main.py dashboard                       # http://localhost:8000
+python main.py run                             # continuous paper-trading loop (Ctrl+C to stop)
 ```
 
 With the default `config/config.yaml`, everything runs against the
@@ -79,10 +88,11 @@ docker compose up -d
 docker compose logs -f stockbot
 ```
 
-This starts Postgres + the bot together; `DATABASE_URL` is injected via
-the compose file so the bot talks to the containerized Postgres instead
-of SQLite. Edit `config/config.yaml` before building to change symbols,
-strategy weights, or risk limits.
+This starts Postgres, the trading loop, and the dashboard (on
+`localhost:8000`) together; `DATABASE_URL` is injected via the compose
+file so the bot talks to the containerized Postgres instead of SQLite.
+Edit `config/config.yaml` before building to change symbols, strategy
+weights, or risk limits.
 
 ## Running tests
 
@@ -90,10 +100,11 @@ strategy weights, or risk limits.
 pytest
 ```
 
-62 tests across indicators, scoring, portfolio accounting, risk limits,
+77 tests across indicators, scoring, portfolio accounting, risk limits,
 execution (slippage/commission), backtesting (including an explicit
-no-look-ahead check), and data validation/resilience. None are
-placeholders - each asserts a specific numeric or behavioral outcome.
+no-look-ahead check), data validation/resilience, and the dashboard API.
+None are placeholders - each asserts a specific numeric or behavioral
+outcome.
 
 ## Configuration
 
@@ -128,11 +139,17 @@ limits, execution costs, database URL, polling interval. Secrets
   engine redistributes sentiment's weight across the other components
   when no news is available rather than silently zeroing part of the
   score.
+- Read-only web dashboard (`python main.py dashboard`, or the `dashboard`
+  service in `docker-compose.yml`) showing current portfolio value/cash/
+  return, an equity curve, open positions, current signals per symbol,
+  recent trades, and the full recent decision log with each reason
+  string. It only reads from the database - it never talks to the
+  trading engine directly, so it can't affect a live run. The backtester
+  now also persists a portfolio snapshot per bar (previously only the
+  live loop did), so a `--persist` backtest is fully viewable here too.
 
 ## Limitations / not yet built
 
-- **No dashboard yet** (Milestone 3). `database.get_recent_decisions()`
-  already exists as a data source for one.
 - **Portfolio state is in-memory per process** - restarting `main.py run`
   starts a fresh paper portfolio at `starting_balance`. Snapshots are
   persisted to the DB for audit, but the live loop doesn't yet reload the
@@ -153,17 +170,16 @@ limits, execution costs, database URL, polling interval. Secrets
 
 ## Recommended next steps
 
-1. **Milestone 3**: a small dashboard (FastAPI + a single HTML page, or a
-   Streamlit app) reading from `DatabaseManager` - portfolio value, open
-   positions, recent decisions/trades, current signals. The read-only
-   query methods on `DatabaseManager` are the intended seam.
-2. Persist/restore portfolio state across `main.py run` restarts.
-3. Once you know the classroom platform: add
+1. Persist/restore portfolio state across `main.py run` restarts.
+2. Once you know the classroom platform: add
    `data/providers/class_simulator.py` implementing `MarketDataProvider`
    and `execution/class_simulator.py` implementing `OrderExecutor` (or a
    `ManualExecutor`-style suggestion queue if automated trading isn't
    allowed). Everything upstream is already platform-agnostic.
-4. If/when real news becomes available, add a sentiment scorer (rule-based
+3. If/when real news becomes available, add a sentiment scorer (rule-based
    or, if you choose to, an optional LLM-based one) - it plugs into
    `TechnicalStrategy._sentiment_score` as just one more component score,
    never as the decision-maker.
+4. If you want to compare strategies (Milestone 5), the `Strategy`
+   interface is already the seam - add a second implementation next to
+   `TechnicalStrategy` and run the same `Backtester` against both.

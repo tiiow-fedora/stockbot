@@ -5,6 +5,9 @@ numpy>=1.26
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
 pytest>=8.0
+httpx>=0.27
+fastapi>=0.110
+uvicorn>=0.29
 
 # Optional: only needed if data.provider or news.provider is set to
 # "alpaca" in config/config.yaml.

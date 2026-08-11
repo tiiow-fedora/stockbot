@@ -248,6 +248,10 @@ def main() -> None:
 
     sub.add_parser("init-db", help="create database tables and exit")
 
+    dashboard_parser = sub.add_parser("dashboard", help="run the read-only web dashboard")
+    dashboard_parser.add_argument("--host", default="0.0.0.0")
+    dashboard_parser.add_argument("--port", type=int, default=8000)
+
     args = parser.parse_args()
     config = load_config(args.config)
     setup_logging(config.log_level, config.log_file)
@@ -260,6 +264,12 @@ def main() -> None:
         db = DatabaseManager(config.database.url)
         db.init_db()
         print(f"Database initialized at {config.database.url}")
+    elif args.command == "dashboard":
+        import uvicorn
+
+        from dashboard.app import create_app
+
+        uvicorn.run(create_app(config), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
