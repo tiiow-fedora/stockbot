@@ -20,14 +20,16 @@ a multi-symbol comparison (see main.py).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from analysis.sentiment import SentimentScorer
 from core.config import ExecutionConfig, RiskConfig, StrategyConfig
 from core.logging import get_logger
 from core.models import Candle, MarketSnapshot, Order, OrderSide, OrderType
+from data.base import NewsDataProvider
 from database.database import DatabaseManager
 from execution.order_builder import decision_to_order, route_order
 from execution.paper import PaperExecutor
@@ -75,7 +77,18 @@ class Backtester:
         starting_balance: float = 100_000.0,
         warmup_bars: int = 40,
         db: Optional[DatabaseManager] = None,
+        news_provider: Optional[NewsDataProvider] = None,
+        sentiment_scorer: Optional[SentimentScorer] = None,
+        news_lookback_days: int = 1,
     ):
+        """`news_provider` is optional and off by default - real historical
+        news backtesting is supported (fetched per bar, bounded to
+        `[decision_bar.timestamp - news_lookback_days, decision_bar.timestamp]`
+        so it never sees news from after the decision, same no-look-ahead
+        guarantee as price data) but costs one network call per bar if the
+        provider is live (e.g. Alpaca), which is slow and can hit rate
+        limits over a long backtest. Leave it None (the default) for fast,
+        offline backtests."""
         self.strategy = strategy
         self.risk_manager = RiskManager(risk_config)
         self.execution_config = execution_config
@@ -83,6 +96,9 @@ class Backtester:
         self.starting_balance = starting_balance
         self.warmup_bars = warmup_bars
         self.db = db
+        self.news_provider = news_provider
+        self.sentiment_scorer = sentiment_scorer
+        self.news_lookback_days = news_lookback_days
 
     def run(self, symbol: str, candles: List[Candle]) -> BacktestResult:
         if len(candles) < self.warmup_bars + 2:
@@ -142,11 +158,20 @@ class Backtester:
                 low=decision_bar.low,
                 close=decision_bar.close,
             )
+            news = []
+            if self.news_provider is not None:
+                news_start = decision_bar.timestamp - timedelta(days=self.news_lookback_days)
+                news = self.news_provider.get_news(symbol, news_start, decision_bar.timestamp)
+                if news and self.sentiment_scorer is not None:
+                    news = self.sentiment_scorer.score_news_items(news)
+                if news and self.db:
+                    self.db.save_news(news)
+
             decision = self.strategy.generate_decision(
                 symbol=symbol,
                 snapshot=snapshot,
                 history=history,
-                news=[],
+                news=news,
                 current_position_qty=portfolio.position_qty(symbol),
                 cash=portfolio.cash,
                 portfolio_value=portfolio.total_value(prices_at_decision),

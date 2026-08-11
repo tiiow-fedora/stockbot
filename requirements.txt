@@ -12,3 +12,7 @@ uvicorn>=0.29
 # Optional: only needed if data.provider or news.provider is set to
 # "alpaca" in config/config.yaml.
 alpaca-py>=0.30
+
+# Optional: only needed if news.sentiment_scorer is set to "llm" in
+# config.yaml. The default "lexicon" scorer needs neither.
+anthropic>=0.40

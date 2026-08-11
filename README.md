@@ -29,15 +29,15 @@ stockbot/
 ├── core/             # models.py (shared types), config.py, logging.py
 ├── data/             # MarketDataProvider / NewsDataProvider interfaces + providers/
 │   └── providers/    # synthetic (dev), csv (backtesting), alpaca (real paper data)
-├── analysis/         # indicators.py: SMA, EMA, RSI, MACD, momentum, volume, volatility
-├── strategy/         # base.py interface, scoring.py (weighted composite), technical.py
+├── analysis/         # indicators.py (SMA/EMA/RSI/MACD/...), sentiment.py (lexicon + optional LLM)
+├── strategy/         # base.py interface, scoring.py, technical.py, mean_reversion.py, registry.py
 ├── portfolio/         # portfolio.py (cash/positions ledger), risk.py (RiskManager)
 ├── execution/        # base.py interface, paper.py, manual.py, order_builder.py (shared)
-├── backtesting/       # engine.py: no-lookahead simulation + buy-and-hold benchmark
+├── backtesting/       # engine.py (no-lookahead sim), compare.py, optimize.py (grid search)
 ├── database/          # database.py: SQLAlchemy models (SQLite or Postgres)
 ├── dashboard/          # app.py: read-only FastAPI dashboard + static/index.html
 ├── tests/             # pytest suite
-├── main.py            # CLI: run / backtest / init-db / dashboard
+├── main.py            # CLI: run / backtest [--compare] / optimize / init-db / dashboard
 ├── Dockerfile, docker-compose.yml
 └── requirements.txt
 ```
@@ -55,6 +55,11 @@ Two small additions beyond the original tree, both in the spirit of
   fill" logic is identical between the live loop and the backtester. It's
   factored into one shared module so those two paths can never quietly
   diverge (which would make backtests stop predicting live behavior).
+- **`strategy/registry.py`** - single source of truth for "which
+  strategies exist" (`technical`, `mean_reversion`). `main.py`,
+  `backtesting/compare.py`, and `backtesting/optimize.py` all read from
+  it, so adding a third strategy means adding one entry, not touching
+  three call sites.
 
 ## Quick start (local, no Docker)
 
@@ -69,10 +74,12 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env          # only needed if you set provider: alpaca
 
-python main.py init-db                        # creates stockbot.db (SQLite)
-python main.py backtest --days 365 --persist   # backtests all configured symbols, saves results
-python main.py dashboard                       # http://localhost:8000
-python main.py run                             # continuous paper-trading loop (Ctrl+C to stop)
+python main.py init-db                          # creates stockbot.db (SQLite)
+python main.py backtest --days 365 --persist    # backtests all configured symbols, saves results
+python main.py backtest --symbol AAPL --compare # run every registered strategy side by side
+python main.py optimize --symbol AAPL           # grid-search strategy parameters (research tool)
+python main.py dashboard                        # http://localhost:8000
+python main.py run                              # continuous paper-trading loop (Ctrl+C to stop)
 ```
 
 With the default `config/config.yaml`, everything runs against the
@@ -100,13 +107,15 @@ weights, or risk limits.
 pytest
 ```
 
-79 tests across indicators, scoring, portfolio accounting, risk limits,
+113 tests across indicators, scoring, portfolio accounting, risk limits,
 execution (slippage/commission), backtesting (including an explicit
-no-look-ahead check), data validation/resilience, the dashboard API, and
-Alpaca credential handling. None are placeholders - each asserts a
-specific numeric or behavioral outcome. (Tests never hit the network -
-they exercise the synthetic provider and mock credentials, not live
-Alpaca calls.)
+no-look-ahead check and optional-news bounds), data validation/
+resilience, the dashboard API, Alpaca/Anthropic credential handling,
+sentiment scoring, both strategies (including a direct check that they
+read the same signal in opposite directions), strategy comparison, and
+parameter grid search. None are placeholders - each asserts a specific
+numeric or behavioral outcome. (Tests never hit the network - they
+exercise the synthetic provider and mock credentials, not live API calls.)
 
 ## Configuration
 
@@ -150,6 +159,31 @@ limits, execution costs, database URL, polling interval. Secrets
   engine redistributes sentiment's weight across the other components
   when no news is available rather than silently zeroing part of the
   score.
+- **News sentiment scoring** (`analysis/sentiment.py`): `LexiconSentimentScorer`
+  is the default - deterministic keyword matching, no API key, no network
+  call, verified against real Alpaca headlines. It returns `None` (not a
+  fake `0.0`) when a headline has no detectable signal, which the scoring
+  engine treats as "no opinion" rather than "confirmed neutral." An
+  optional `LLMSentimentScorer` exists behind the exact same interface
+  (`news.sentiment_scorer: llm` + `ANTHROPIC_API_KEY`) but is off by
+  default and untested against a live key - the strategy works
+  identically either way, which is the point of the interface.
+- **A second strategy** (`strategy/mean_reversion.py`): `MeanReversionStrategy`
+  is a contrarian counterpart to `TechnicalStrategy` - it reads the same
+  price-vs-SMA divergence in the opposite direction (buy the dip instead
+  of following the trend) and fades momentum instead of following it.
+  Proves the `Strategy` interface is genuinely swappable, and gives
+  `backtest --compare` two meaningfully different strategies to compare,
+  not two copies of the same logic.
+- **Strategy comparison** (`backtesting/compare.py`, `main.py backtest --compare`):
+  runs every registered strategy against the same historical data with
+  independent portfolios and prints a side-by-side table (return, vs.
+  benchmark, trades, win rate, max drawdown, Sharpe).
+- **Parameter grid search** (`backtesting/optimize.py`, `main.py optimize`):
+  sweeps `buy_threshold` / `sell_threshold` / `sma_short_period` /
+  `sma_long_period` and ranks combinations by return or Sharpe. Prints an
+  explicit overfitting warning every time - a top result is fit to the
+  exact historical window it was tested on, not a promise about the future.
 - Read-only web dashboard (`python main.py dashboard`, or the `dashboard`
   service in `docker-compose.yml`) showing current portfolio value/cash/
   return, an equity curve, open positions, current signals per symbol,
@@ -165,10 +199,6 @@ limits, execution costs, database URL, polling interval. Secrets
   starts a fresh paper portfolio at `starting_balance`. Snapshots are
   persisted to the DB for audit, but the live loop doesn't yet reload the
   last snapshot on startup. Worth fixing before a long unattended run.
-- **News sentiment scoring is a stub** - `AlpacaNewsProvider` fetches
-  headlines but does not score sentiment (Alpaca doesn't provide it).
-  `NewsItem.sentiment` stays `None` until a sentiment module is added; the
-  scoring engine already handles that case correctly.
 - **No classroom platform adapter yet** - intentionally deferred until
   the platform is known (Milestone 6). The interfaces it will implement
   (`MarketDataProvider`, `OrderExecutor`) already exist and are exercised
@@ -177,7 +207,23 @@ limits, execution costs, database URL, polling interval. Secrets
 - **Single-symbol-per-run backtester** - `main.py backtest` loops over
   symbols and reports each individually plus an average; there's no
   portfolio-level multi-symbol backtest (shared cash across symbols
-  simultaneously) yet.
+  simultaneously) yet. `compare`/`optimize` are also single-symbol.
+- **The lexicon sentiment scorer is intentionally simple** - keyword
+  matching has no contextual understanding (e.g. "costs could jump" can
+  score positive purely because "jump" is in the positive word list, even
+  though the headline is about rising costs). It's an honest, cheap,
+  deterministic signal - not a claim of accuracy.
+- **Backtesting with real historical news is supported but opt-in and
+  slow** - `Backtester(..., news_provider=..., sentiment_scorer=...)`
+  fetches news per bar bounded to what was known as of that bar (no
+  look-ahead), but a live provider like Alpaca means one network call per
+  bar, which is slow and can hit rate limits over a long backtest.
+  `main.py backtest`/`--compare`/`optimize` don't wire this up by default
+  for that reason; it's proven correct in tests with an in-memory fake
+  provider instead.
+- **The parameter grid search only sweeps top-level scalar fields** (not
+  the nested `weights`), and has no walk-forward/out-of-sample splitting
+  built in - the printed warning is the whole safeguard right now.
 
 ## Recommended next steps
 
@@ -187,10 +233,10 @@ limits, execution costs, database URL, polling interval. Secrets
    and `execution/class_simulator.py` implementing `OrderExecutor` (or a
    `ManualExecutor`-style suggestion queue if automated trading isn't
    allowed). Everything upstream is already platform-agnostic.
-3. If/when real news becomes available, add a sentiment scorer (rule-based
-   or, if you choose to, an optional LLM-based one) - it plugs into
-   `TechnicalStrategy._sentiment_score` as just one more component score,
-   never as the decision-maker.
-4. If you want to compare strategies (Milestone 5), the `Strategy`
-   interface is already the seam - add a second implementation next to
-   `TechnicalStrategy` and run the same `Backtester` against both.
+3. If you want to actually exercise the optional LLM sentiment path, set
+   `news.sentiment_scorer: llm` and `ANTHROPIC_API_KEY` and try it against
+   real headlines - it's implemented and credential-guarded but has never
+   been run live (unlike the Alpaca providers, which have been).
+4. Add walk-forward validation to `backtesting/optimize.py`: split the
+   history into a fit window and a held-out test window, and only trust
+   parameters that hold up on the window they weren't tuned on.

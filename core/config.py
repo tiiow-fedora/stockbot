@@ -71,6 +71,7 @@ class DataConfig(BaseModel):
 
 class NewsConfig(BaseModel):
     provider: str = "none"             # "none" or "alpaca"
+    sentiment_scorer: str = "lexicon"  # "none", "lexicon" (default, no API key needed), or "llm" (optional)
 
 
 class DatabaseConfig(BaseModel):

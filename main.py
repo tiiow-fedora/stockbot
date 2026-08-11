@@ -1,10 +1,13 @@
 """
 StockBot entry point.
 
-    python main.py run                 # continuous paper-trading loop
-    python main.py backtest            # backtest all configured symbols
+    python main.py run                              # continuous paper-trading loop
+    python main.py backtest                         # backtest all configured symbols
     python main.py backtest --symbol AAPL --days 365
-    python main.py init-db             # create database tables and exit
+    python main.py backtest --compare               # run every registered strategy side by side
+    python main.py optimize --symbol AAPL           # grid-search strategy parameters (research tool)
+    python main.py dashboard                        # read-only web dashboard
+    python main.py init-db                          # create database tables and exit
 
 Every object below is built by a small factory function so that swapping
 a component (e.g. Alpaca -> a future classroom-platform adapter) means
@@ -23,6 +26,7 @@ from typing import Dict, Optional
 
 from dotenv import load_dotenv
 
+from analysis.sentiment import SentimentScorer, build_sentiment_scorer
 from core.config import AppConfig, load_config
 from core.logging import get_logger, setup_logging
 from core.models import Action
@@ -37,8 +41,7 @@ from execution.paper import PaperExecutor
 from portfolio.portfolio import Portfolio
 from portfolio.risk import RiskManager
 from strategy.base import Strategy
-from strategy.scoring import ScoringEngine
-from strategy.technical import TechnicalStrategy
+from strategy.registry import STRATEGY_BUILDERS, build_strategy_by_name
 
 logger = get_logger("main")
 
@@ -65,14 +68,7 @@ def build_market_data_provider(config: AppConfig) -> MarketDataProvider:
 
 
 def build_strategy(config: AppConfig) -> Strategy:
-    if config.strategy.name == "technical":
-        scoring_engine = ScoringEngine(
-            weights=config.strategy.weights,
-            buy_threshold=config.strategy.buy_threshold,
-            sell_threshold=config.strategy.sell_threshold,
-        )
-        return TechnicalStrategy(config.strategy, scoring_engine)
-    raise ValueError(f"unknown strategy: {config.strategy.name!r}")
+    return build_strategy_by_name(config.strategy.name, config.strategy)
 
 
 def build_executor(config: AppConfig) -> OrderExecutor:
@@ -93,6 +89,7 @@ def run_live_loop(config: AppConfig) -> None:
 
     provider = build_market_data_provider(config)
     news_provider = build_news_provider(config.news)
+    sentiment_scorer = build_sentiment_scorer(config.news.sentiment_scorer)
     market_data = MarketDataService(provider, db)
     strategy = build_strategy(config)
     risk_manager = RiskManager(config.risk)
@@ -109,13 +106,18 @@ def run_live_loop(config: AppConfig) -> None:
 
     try:
         while True:
-            _run_cycle(config, db, provider, market_data, news_provider, strategy, risk_manager, executor, portfolio)
+            _run_cycle(
+                config, db, provider, market_data, news_provider, sentiment_scorer,
+                strategy, risk_manager, executor, portfolio,
+            )
             time.sleep(config.polling_interval_seconds)
     except KeyboardInterrupt:
         logger.info("StockBot stopped by user.")
 
 
-def _run_cycle(config, db, provider, market_data, news_provider, strategy, risk_manager, executor, portfolio) -> None:
+def _run_cycle(
+    config, db, provider, market_data, news_provider, sentiment_scorer, strategy, risk_manager, executor, portfolio
+) -> None:
     prices: Dict[str, float] = {}
     snapshots = {}
 
@@ -143,6 +145,8 @@ def _run_cycle(config, db, provider, market_data, news_provider, strategy, risk_
 
             news_start = snapshot.timestamp - timedelta(days=1)
             news = news_provider.get_news(symbol, news_start, snapshot.timestamp)
+            if news and sentiment_scorer is not None:
+                news = sentiment_scorer.score_news_items(news)
             if news:
                 db.save_news(news)
 
@@ -186,7 +190,9 @@ def _run_cycle(config, db, provider, market_data, news_provider, strategy, risk_
 # Backtesting
 # --------------------------------------------------------------------------
 
-def run_backtest(config: AppConfig, symbol_filter: Optional[str], days: int, persist: bool) -> None:
+def run_backtest(
+    config: AppConfig, symbol_filter: Optional[str], days: int, persist: bool, compare: bool
+) -> None:
     from backtesting.engine import Backtester
 
     provider = build_market_data_provider(config)
@@ -198,6 +204,10 @@ def run_backtest(config: AppConfig, symbol_filter: Optional[str], days: int, per
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
+
+    if compare:
+        _run_compare(config, provider, symbols, start, end, db)
+        return
 
     results = []
     for symbol in symbols:
@@ -228,6 +238,51 @@ def run_backtest(config: AppConfig, symbol_filter: Optional[str], days: int, per
     print(f"\nAverage across {len(results)} symbols: strategy {avg_return:+.2%} vs buy-and-hold {avg_benchmark:+.2%}")
 
 
+def _run_compare(config: AppConfig, provider, symbols, start, end, db) -> None:
+    from backtesting.compare import compare_strategies, format_comparison_table
+
+    for symbol in symbols:
+        candles = provider.get_historical_candles(symbol, start, end, config.data.timeframe)
+        print(f"\n=== {symbol} ===")
+        try:
+            results = compare_strategies(
+                symbol=symbol,
+                candles=candles,
+                strategy_config=config.strategy,
+                risk_config=config.risk,
+                execution_config=config.execution,
+                starting_balance=config.backtest.starting_balance,
+                warmup_bars=config.backtest.warmup_bars,
+                db=db,
+            )
+        except ValueError as exc:
+            logger.warning("Skipping %s: %s", symbol, exc)
+            continue
+        print(format_comparison_table(results))
+
+
+def run_optimize(config: AppConfig, symbol: str, days: int, top: int, objective: str) -> None:
+    from backtesting.optimize import format_grid_search_table, grid_search
+
+    provider = build_market_data_provider(config)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    candles = provider.get_historical_candles(symbol, start, end, config.data.timeframe)
+
+    results = grid_search(
+        symbol=symbol,
+        candles=candles,
+        base_strategy_config=config.strategy,
+        risk_config=config.risk,
+        execution_config=config.execution,
+        strategy_name=config.strategy.name,
+        starting_balance=config.backtest.starting_balance,
+        warmup_bars=config.backtest.warmup_bars,
+        objective=objective,
+    )
+    print(format_grid_search_table(results, top=top, objective=objective))
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -245,12 +300,27 @@ def main() -> None:
     backtest_parser.add_argument("--symbol", default=None, help="backtest a single symbol instead of all configured symbols")
     backtest_parser.add_argument("--days", type=int, default=365, help="lookback window in days")
     backtest_parser.add_argument("--persist", action="store_true", help="write decisions/orders/fills to the database")
+    backtest_parser.add_argument(
+        "--compare", action="store_true",
+        help="run every registered strategy (see strategy/registry.py) and print a comparison table",
+    )
 
     sub.add_parser("init-db", help="create database tables and exit")
 
     dashboard_parser = sub.add_parser("dashboard", help="run the read-only web dashboard")
     dashboard_parser.add_argument("--host", default="0.0.0.0")
     dashboard_parser.add_argument("--port", type=int, default=8000)
+
+    optimize_parser = sub.add_parser(
+        "optimize", help="grid-search strategy parameters against historical data (research tool, not a promise of future returns)"
+    )
+    optimize_parser.add_argument("--symbol", required=True, help="symbol to optimize against")
+    optimize_parser.add_argument("--days", type=int, default=365, help="lookback window in days")
+    optimize_parser.add_argument("--top", type=int, default=5, help="how many top parameter combos to print")
+    optimize_parser.add_argument(
+        "--objective", default="total_return_pct", choices=["total_return_pct", "sharpe_ratio"],
+        help="metric to rank parameter combinations by",
+    )
 
     args = parser.parse_args()
     config = load_config(args.config)
@@ -259,7 +329,9 @@ def main() -> None:
     if args.command == "run":
         run_live_loop(config)
     elif args.command == "backtest":
-        run_backtest(config, args.symbol, args.days, args.persist)
+        run_backtest(config, args.symbol, args.days, args.persist, args.compare)
+    elif args.command == "optimize":
+        run_optimize(config, args.symbol, args.days, args.top, args.objective)
     elif args.command == "init-db":
         db = DatabaseManager(config.database.url)
         db.init_db()

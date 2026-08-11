@@ -26,8 +26,11 @@ data:
 news:
   # "none" (default - the strategy works fine without news) or "alpaca".
   provider: alpaca
+  # "none" (no scoring), "lexicon" (default, no API key needed), or "llm" (optional, needs ANTHROPIC_API_KEY).
+  sentiment_scorer: lexicon
 
 strategy:
+  # "technical" (trend-following) or "mean_reversion" (contrarian) - see strategy/registry.py.
   name: technical
   weights:
     technical: 0.30
