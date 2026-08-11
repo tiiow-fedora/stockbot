@@ -70,6 +70,11 @@ execution:
   slippage_bps: 5.0
   commission_per_trade: 0.0
   commission_pct: 0.0
+  # Optional (mode: paper only): also best-effort mirror every fill to
+  # your own Alpaca PAPER account so trades show up on Alpaca's dashboard
+  # too. Purely cosmetic - the local ledger above is still what everything
+  # (risk checks, portfolio value, the StockBot dashboard) is driven by.
+  mirror_to_alpaca: false
 
 database:
   url: sqlite:///./stockbot.db

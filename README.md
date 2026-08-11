@@ -32,7 +32,7 @@ stockbot/
 ├── analysis/         # indicators.py (SMA/EMA/RSI/MACD/...), sentiment.py (lexicon + optional LLM)
 ├── strategy/         # base.py interface, scoring.py, technical.py, mean_reversion.py, registry.py
 ├── portfolio/         # portfolio.py (cash/positions ledger), risk.py (RiskManager)
-├── execution/        # base.py interface, paper.py, manual.py, order_builder.py (shared)
+├── execution/        # base.py interface, paper.py, manual.py, alpaca_mirror.py (optional), order_builder.py (shared)
 ├── backtesting/       # engine.py (no-lookahead sim), compare.py, optimize.py (grid search)
 ├── database/          # database.py: SQLAlchemy models (SQLite or Postgres)
 ├── dashboard/          # app.py: read-only FastAPI dashboard + static/index.html
@@ -107,15 +107,16 @@ weights, or risk limits.
 pytest
 ```
 
-113 tests across indicators, scoring, portfolio accounting, risk limits,
-execution (slippage/commission), backtesting (including an explicit
-no-look-ahead check and optional-news bounds), data validation/
-resilience, the dashboard API, Alpaca/Anthropic credential handling,
-sentiment scoring, both strategies (including a direct check that they
-read the same signal in opposite directions), strategy comparison, and
-parameter grid search. None are placeholders - each asserts a specific
-numeric or behavioral outcome. (Tests never hit the network - they
-exercise the synthetic provider and mock credentials, not live API calls.)
+118 tests across indicators, scoring, portfolio accounting, risk limits,
+execution (slippage/commission, including the Alpaca mirror executor -
+mocked, not live), backtesting (including an explicit no-look-ahead
+check and optional-news bounds), data validation/resilience, the
+dashboard API, Alpaca/Anthropic credential handling, sentiment scoring,
+both strategies (including a direct check that they read the same
+signal in opposite directions), strategy comparison, and parameter grid
+search. None are placeholders - each asserts a specific numeric or
+behavioral outcome. (Tests never hit the network - they exercise the
+synthetic provider and mock credentials/clients, not live API calls.)
 
 ## Configuration
 
@@ -192,6 +193,20 @@ limits, execution costs, database URL, polling interval. Secrets
   trading engine directly, so it can't affect a live run. The backtester
   now also persists a portfolio snapshot per bar (previously only the
   live loop did), so a `--persist` backtest is fully viewable here too.
+- **Optional Alpaca mirroring** (`execution/alpaca_mirror.py`,
+  `execution.mirror_to_alpaca: true`): Alpaca is otherwise used only as a
+  read-only data source - the local `PaperExecutor`/`Portfolio` is always
+  the authoritative record of what StockBot "owns," which is why Alpaca's
+  own dashboard shows nothing by default even while StockBot is actively
+  trading. `AlpacaMirrorExecutor` wraps the local executor and, purely for
+  visualization, best-effort mirrors every fill to your own Alpaca PAPER
+  account too (hard-coded `paper=True` - can never touch a live account).
+  Verified live: submitted a real order, confirmed via Alpaca's own API
+  that it was accepted (queued for the next market open, since the
+  market was closed at the time - completely normal). If the mirror call
+  fails for any reason, it's logged and swallowed; the local fill that
+  already happened is never affected, so the two ledgers can drift out of
+  sync over time - that's an accepted tradeoff for a cosmetic feature.
 
 ## Limitations / not yet built
 

@@ -73,7 +73,12 @@ def build_strategy(config: AppConfig) -> Strategy:
 
 def build_executor(config: AppConfig) -> OrderExecutor:
     if config.execution.mode == "paper":
-        return PaperExecutor(config.execution)
+        paper = PaperExecutor(config.execution)
+        if config.execution.mirror_to_alpaca:
+            from execution.alpaca_mirror import AlpacaMirrorExecutor
+
+            return AlpacaMirrorExecutor(paper)
+        return paper
     if config.execution.mode == "manual":
         return ManualExecutor()
     raise ValueError(f"unknown execution mode: {config.execution.mode!r}")

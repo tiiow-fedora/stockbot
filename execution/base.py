@@ -18,6 +18,12 @@ from typing import Optional
 from core.models import Fill, Order
 
 
+class ExecutionError(Exception):
+    """Raised for executor-level setup problems (e.g. missing credentials
+    for a mirroring executor) - never raised mid-trade to abort a fill
+    that's already been risk-approved."""
+
+
 class OrderExecutor(ABC):
     @abstractmethod
     def execute(self, order: Order, market_price: float, timestamp: datetime) -> Optional[Fill]:

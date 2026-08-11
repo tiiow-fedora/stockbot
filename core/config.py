@@ -60,6 +60,12 @@ class ExecutionConfig(BaseModel):
     slippage_bps: float = 5.0          # basis points of adverse price movement on fill
     commission_per_trade: float = 0.0  # flat fee per fill
     commission_pct: float = 0.0        # percentage fee per fill (in addition to flat fee)
+    # Optional, off by default: best-effort mirror every local paper fill to
+    # your own Alpaca PAPER account too, purely so trades also show up on
+    # Alpaca's dashboard. Only takes effect when mode: paper. Requires
+    # ALPACA_API_KEY/ALPACA_SECRET_KEY. Never touches a live account - see
+    # execution/alpaca_mirror.py. Ignored during backtesting (live loop only).
+    mirror_to_alpaca: bool = False
 
 
 class DataConfig(BaseModel):
