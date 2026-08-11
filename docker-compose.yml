@@ -20,12 +20,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # env_file loads ALPACA_API_KEY / ALPACA_SECRET_KEY / ANTHROPIC_API_KEY
+    # from .env (gitignored) next to this file INTO the container's
+    # environment - docker compose reads .env for variable substitution
+    # in this file automatically, but that alone does NOT inject those
+    # variables into the container; env_file is what does that.
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+psycopg2://stockbot:stockbot@postgres:5432/stockbot
       LOG_LEVEL: INFO
-      # ALPACA_API_KEY / ALPACA_SECRET_KEY: set these in a .env file next to
-      # this compose file (docker compose loads it automatically) if you set
-      # data.provider or news.provider to "alpaca" in config/config.yaml.
     volumes:
       - ./config:/app/config:ro
       - ./data_files:/app/data_files:ro
