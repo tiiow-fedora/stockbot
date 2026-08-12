@@ -20,7 +20,7 @@ execution/paper.py for the local paper simulator used by this project.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from core.logging import get_logger
@@ -106,20 +106,35 @@ class AlpacaMarketDataProvider(MarketDataProvider):
         return candles
 
     def get_snapshot(self, symbol: str) -> MarketSnapshot:
-        from alpaca.data.enums import DataFeed
-        from alpaca.data.requests import StockLatestTradeRequest
+        """Uses today's still-forming DAILY bar, not the latest single
+        trade. This matters for `volume`: a single trade's size (e.g.
+        100 shares) is not remotely comparable to the daily volumes in
+        `history` (millions of shares) that `analysis.indicators.
+        volume_change` compares it against - using trade size there made
+        every cycle read as a ~100% volume collapse regardless of actual
+        conditions, silently suppressing the volume component of every
+        decision. Today's cumulative daily-bar volume-so-far is directly
+        comparable to prior full days' volumes instead. This also
+        correctly fills in open/high/low, which the latest-trade version
+        always left as None."""
+        now = datetime.now(timezone.utc)
+        # A few days back guarantees today's still-forming bar is the
+        # last entry even right after a weekend/holiday reopen, before
+        # today's first trade has printed.
+        candles = self.get_historical_candles(symbol, now - timedelta(days=5), now, "1Day")
+        if not candles:
+            raise MarketDataError(f"no recent daily bar available for {symbol}")
 
-        try:
-            request = StockLatestTradeRequest(symbol_or_symbols=symbol, feed=DataFeed.IEX)
-            trade = self._client.get_stock_latest_trade(request)[symbol]
-        except Exception as exc:
-            raise MarketDataError(f"Alpaca latest trade request failed for {symbol}: {exc}") from exc
-
+        latest = candles[-1]
         return MarketSnapshot(
             symbol=symbol,
-            timestamp=trade.timestamp,
-            price=float(trade.price),
-            volume=int(getattr(trade, "size", 0) or 0),
+            timestamp=now,
+            price=latest.close,
+            volume=latest.volume,
+            open=latest.open,
+            high=latest.high,
+            low=latest.low,
+            close=latest.close,
         )
 
 
