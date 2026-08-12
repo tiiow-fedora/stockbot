@@ -3,10 +3,46 @@
 # Everything here is safe to commit - no secrets. API keys go in .env
 # (copy .env.example -> .env, which is gitignored).
 
+# Fixed watchlist - the bot only ever looks at symbols listed here, not
+# the whole market. Chosen for liquidity/data quality (large, heavily
+# traded names give indicators clean signal), not as a prediction that
+# any of them will go up - that's what backtesting and the dashboard are
+# for, not this list. Spread across sectors so the bot isn't just making
+# one big correlated bet on "tech had a good/bad day."
 symbols:
+  # Tech
   - AAPL
   - MSFT
   - NVDA
+  - GOOGL
+  - AMZN
+  - META
+  - AMD
+  - INTC
+  - CRM
+  - ADBE
+  - ORCL
+  - CSCO
+  - NFLX
+  # Financials
+  - JPM
+  - V
+  - MA
+  - BAC
+  # Healthcare
+  - JNJ
+  - UNH
+  - PFE
+  # Consumer
+  - WMT
+  - HD
+  - COST
+  - KO
+  - PEP
+  - PG
+  # Industrial / Energy / Media
+  - XOM
+  - DIS
 
 starting_balance: 100000.0
 polling_interval_seconds: 60
