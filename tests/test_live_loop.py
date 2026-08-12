@@ -52,7 +52,7 @@ class _FakeMarketData:
 
 class _FarFutureCalendar:
     def next_open(self, now):
-        return now + timedelta(hours=10)  # longer than MAX_CLOSED_MARKET_SLEEP_SECONDS
+        return now + timedelta(hours=10)  # longer than max_closed_market_heartbeat_seconds
 
 
 class _SoonCalendar:
@@ -86,7 +86,7 @@ def test_heartbeat_caps_sleep_duration_at_the_configured_maximum(tmp_path):
         config, db, _FakeMarketData({"AAPL": 150.0}), portfolio, _FarFutureCalendar(), NOW
     )
 
-    assert sleep_seconds == main.MAX_CLOSED_MARKET_SLEEP_SECONDS
+    assert sleep_seconds == config.max_closed_market_heartbeat_seconds
 
 
 def test_heartbeat_does_not_cap_a_short_wait(tmp_path):

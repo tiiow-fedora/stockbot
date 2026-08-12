@@ -45,12 +45,6 @@ from strategy.registry import STRATEGY_BUILDERS, build_strategy_by_name
 
 logger = get_logger("main")
 
-# While the market is closed, re-check at most this often rather than
-# sleeping straight through to the next open - keeps the dashboard's
-# "last update" fresh and the process visibly alive over a long
-# weekend/holiday instead of going silent for 60+ hours at a stretch.
-MAX_CLOSED_MARKET_SLEEP_SECONDS = 1800
-
 
 # --------------------------------------------------------------------------
 # Factories (the dependency-injection seam)
@@ -164,7 +158,7 @@ def _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now: d
 
     next_open = calendar.next_open(now)
     seconds_until_open = max(1.0, (next_open - now).total_seconds())
-    sleep_seconds = min(seconds_until_open, MAX_CLOSED_MARKET_SLEEP_SECONDS)
+    sleep_seconds = min(seconds_until_open, config.max_closed_market_heartbeat_seconds)
     logger.info(
         "Market closed - next open %s (in %.0f min). No trading; rechecking in %.0f min.",
         next_open.isoformat(),

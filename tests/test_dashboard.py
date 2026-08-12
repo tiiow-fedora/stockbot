@@ -76,10 +76,24 @@ def test_status_running_after_recent_snapshot(client, db):
 
 
 def test_status_stale_after_old_snapshot(client, db, config):
-    old = NOW - timedelta(seconds=config.polling_interval_seconds * 10)
+    old = NOW - timedelta(seconds=config.max_closed_market_heartbeat_seconds * 2)
     db.save_portfolio_snapshot(PortfolioSnapshot(old, cash=90_000, positions_value=15_000, total_value=105_000, positions={}))
     body = client.get("/api/status").json()
     assert body["status"] == "stale"
+
+
+def test_status_running_during_closed_market_heartbeat_gap(client, db, config):
+    """A snapshot from 20 minutes ago is well past 3x the normal 60s
+    polling interval, but must still read "running" - that's exactly the
+    gap between heartbeats while the market is closed (up to
+    max_closed_market_heartbeat_seconds), not a sign the bot died."""
+    assert config.polling_interval_seconds * 3 < 20 * 60  # sanity: this age would fail the naive check
+    recent_ish = NOW - timedelta(minutes=20)
+    db.save_portfolio_snapshot(
+        PortfolioSnapshot(recent_ish, cash=90_000, positions_value=15_000, total_value=105_000, positions={})
+    )
+    body = client.get("/api/status").json()
+    assert body["status"] == "running"
 
 
 def test_portfolio_defaults_to_starting_balance_when_no_snapshot(client):

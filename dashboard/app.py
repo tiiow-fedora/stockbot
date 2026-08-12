@@ -45,7 +45,16 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             last_update = snapshot["timestamp"]
             last_ts = datetime.fromisoformat(last_update)
             age_seconds = (datetime.now(timezone.utc) - last_ts).total_seconds()
-            bot_status = "running" if age_seconds <= config.polling_interval_seconds * 3 else "stale"
+            # Must tolerate BOTH cadences: normal polling while the market
+            # is open, and the slower closed-market heartbeat (up to
+            # max_closed_market_heartbeat_seconds between updates) - using
+            # only the polling interval here would falsely show "stale"
+            # every time the market closes, even with the bot working fine.
+            staleness_threshold = max(
+                config.polling_interval_seconds * 3,
+                config.max_closed_market_heartbeat_seconds * 1.5,
+            )
+            bot_status = "running" if age_seconds <= staleness_threshold else "stale"
         return {
             "status": bot_status,
             "last_update": last_update,

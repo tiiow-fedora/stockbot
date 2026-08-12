@@ -98,6 +98,13 @@ class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["AAPL", "MSFT", "NVDA"])
     starting_balance: float = 100000.0
     polling_interval_seconds: int = 60
+    # While the market is closed, the live loop re-checks (and writes a
+    # heartbeat portfolio snapshot) at most this often rather than sleeping
+    # straight through to the next open. Shared with the dashboard's
+    # "running" vs "stale" status check, which must tolerate this slower
+    # cadence during closed-market hours instead of assuming the normal
+    # polling_interval_seconds pace around the clock.
+    max_closed_market_heartbeat_seconds: int = 1800
     log_level: str = "INFO"
     log_file: Optional[str] = "logs/stockbot.log"
 

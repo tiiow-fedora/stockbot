@@ -10,6 +10,10 @@ symbols:
 
 starting_balance: 100000.0
 polling_interval_seconds: 60
+# While the market is closed, re-check/heartbeat at most this often instead
+# of the normal polling_interval_seconds pace. Also used by the dashboard's
+# "running" vs "stale" status check, which must tolerate this slower cadence.
+max_closed_market_heartbeat_seconds: 1800
 log_level: INFO
 log_file: logs/stockbot.log
 
