@@ -13,7 +13,7 @@ portfolio snapshots, and news.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import (
@@ -449,6 +449,26 @@ class DatabaseManager:
                 }
                 for fill, order in rows
             ]
+
+    def count_trades_today(self, symbol: str, now: datetime) -> int:
+        """Number of fills for `symbol` on `now`'s calendar date (UTC).
+        Used by RiskManager to enforce max_trades_per_symbol_per_day
+        across process restarts - counting from the DB instead of an
+        in-memory list means a live-loop restart can't quietly reset the
+        limit and let a symbol get bought more times than configured."""
+        start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        end_of_day = start_of_day + timedelta(days=1)
+        with self.Session() as session:
+            return (
+                session.query(FillORM)
+                .join(OrderORM, FillORM.order_id == OrderORM.id)
+                .filter(
+                    OrderORM.symbol == symbol,
+                    FillORM.timestamp >= start_of_day,
+                    FillORM.timestamp < end_of_day,
+                )
+                .count()
+            )
 
     def get_recent_risk_rejections(self, limit: int = 50) -> List[Dict]:
         with self.Session() as session:

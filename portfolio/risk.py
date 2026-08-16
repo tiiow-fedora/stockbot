@@ -17,12 +17,15 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from core.config import RiskConfig
 from core.logging import get_logger
 from core.models import Order, OrderSide, OrderType
 from portfolio.portfolio import Portfolio
+
+if TYPE_CHECKING:
+    from database.database import DatabaseManager
 
 logger = get_logger("portfolio.risk")
 
@@ -35,8 +38,19 @@ class RiskDecision:
 
 
 class RiskManager:
-    def __init__(self, config: RiskConfig):
+    def __init__(self, config: RiskConfig, db: Optional["DatabaseManager"] = None):
+        """`db` is optional and only meaningful for the live loop. When
+        provided, max_trades_per_symbol_per_day is enforced by counting
+        actual fills in the database instead of an in-memory list, so a
+        process restart (redeploying a fix, a crash, `docker compose
+        restart`) can't silently reset the count and let a symbol get
+        bought more times in a day than configured - which is exactly
+        what happened before this fix existed. Backtester intentionally
+        never passes db here: each backtest run is its own self-contained
+        simulation and should count from a clean in-memory slate, not
+        whatever happens to be in the database from other runs."""
         self.config = config
+        self.db = db
         self._trade_timestamps: Dict[str, List[datetime]] = defaultdict(list)
 
     # -- sizing -----------------------------------------------------------
@@ -125,6 +139,8 @@ class RiskManager:
         return RiskDecision(True, quantity, "approved")
 
     def _trades_today(self, symbol: str, now: datetime) -> int:
+        if self.db is not None:
+            return self.db.count_trades_today(symbol, now)
         return sum(1 for ts in self._trade_timestamps[symbol] if ts.date() == now.date())
 
     # -- protective exits -----------------------------------------------------

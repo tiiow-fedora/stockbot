@@ -106,7 +106,7 @@ def run_live_loop(config: AppConfig) -> None:
     sentiment_scorer = build_sentiment_scorer(config.news.sentiment_scorer)
     market_data = MarketDataService(provider, db)
     strategy = build_strategy(config)
-    risk_manager = RiskManager(config.risk)
+    risk_manager = RiskManager(config.risk, db=db)
     executor = build_executor(config)
     portfolio = Portfolio(config.starting_balance)
     calendar = build_market_calendar(config)

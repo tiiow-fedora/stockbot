@@ -6,6 +6,7 @@ import pytest
 
 from core.config import RiskConfig
 from core.models import Fill, Order, OrderSide, OrderType
+from database.database import DatabaseManager
 from portfolio.portfolio import Portfolio
 from portfolio.risk import RiskManager
 
@@ -132,3 +133,53 @@ def test_no_exit_order_within_normal_range():
     apply_buy(p, "AAPL", 10, 100.0)
     orders = rm.check_stop_loss_take_profit(p, {"AAPL": 103.0}, now=NOW)
     assert orders == []
+
+
+def test_db_backed_frequency_limit_survives_a_simulated_restart(tmp_path):
+    """Real bug this guards against: the in-memory trade counter used to
+    reset to zero on every process restart, silently letting a symbol get
+    bought more times in a day than max_trades_per_symbol_per_day allows
+    (confirmed live: INTC got bought 6 times in one day against a limit
+    of 3, exactly across several redeploys). A fresh RiskManager backed
+    by the same database must still see - and enforce - prior fills."""
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    db = DatabaseManager(db_url)
+    db.init_db()
+
+    config = RiskConfig(max_trades_per_symbol_per_day=3, max_position_size_pct=1.0)
+    portfolio = Portfolio(100_000)
+
+    # First "process": place 3 approved buys, as a real live loop would.
+    rm1 = RiskManager(config, db=db)
+    for _ in range(3):
+        order = Order(symbol="INTC", side=OrderSide.BUY, quantity=1, order_type=OrderType.MARKET, timestamp=NOW)
+        decision = rm1.evaluate_order(order, portfolio, {"INTC": 100.0}, now=NOW)
+        assert decision.approved
+        fill = Fill(order=order, fill_price=100.0, quantity=1, timestamp=NOW)
+        portfolio.apply_fill(fill)
+        order_id = db.save_order(order)
+        db.save_fill(fill, order_id)
+
+    # Simulate a restart: brand-new RiskManager and DatabaseManager, same DB.
+    rm2 = RiskManager(config, db=DatabaseManager(db_url))
+    order = Order(symbol="INTC", side=OrderSide.BUY, quantity=1, order_type=OrderType.MARKET, timestamp=NOW)
+    decision = rm2.evaluate_order(order, portfolio, {"INTC": 100.0}, now=NOW)
+
+    assert decision.approved is False
+    assert decision.reason == "max_trade_frequency"
+
+
+def test_without_db_frequency_limit_is_in_memory_only_and_does_not_persist():
+    """Backtester relies on this: no db means each RiskManager instance
+    starts with a clean slate, which is correct for a self-contained
+    backtest run - this is the deliberate default, not an oversight."""
+    config = RiskConfig(max_trades_per_symbol_per_day=1, max_position_size_pct=1.0)
+    portfolio = Portfolio(100_000)
+
+    rm1 = RiskManager(config)  # no db
+    order1 = Order(symbol="INTC", side=OrderSide.BUY, quantity=1, order_type=OrderType.MARKET, timestamp=NOW)
+    assert rm1.evaluate_order(order1, portfolio, {"INTC": 100.0}, now=NOW).approved is True
+
+    rm2 = RiskManager(config)  # a fresh instance, still no db - starts over
+    order2 = Order(symbol="INTC", side=OrderSide.BUY, quantity=1, order_type=OrderType.MARKET, timestamp=NOW)
+    assert rm2.evaluate_order(order2, portfolio, {"INTC": 100.0}, now=NOW).approved is True
