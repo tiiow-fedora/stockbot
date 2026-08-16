@@ -77,7 +77,14 @@ news:
 
 strategy:
   # "technical" (trend-following) or "mean_reversion" (contrarian) - see strategy/registry.py.
-  name: technical
+  # Set to mean_reversion 2026-08-16: over a 120-day backtest window (a
+  # semester-length proxy) across AAPL/NVDA/CRM/ADBE/INTC/JPM, it
+  # consistently matched or beat technical - notably on AAPL and NVDA,
+  # where technical's one trade was a full loser (0% win rate) while
+  # mean_reversion won on every trade. Re-run `main.py backtest --compare`
+  # periodically once the semester is actually underway - 120 days of
+  # recent history is not a promise about the next 90.
+  name: mean_reversion
   weights:
     technical: 0.30
     momentum: 0.25
