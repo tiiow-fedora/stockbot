@@ -97,6 +97,13 @@ def build_market_calendar(config: AppConfig):
 # Live (paper) trading loop
 # --------------------------------------------------------------------------
 
+# How long the live loop waits after a failed iteration before retrying, and
+# the ceiling that backoff doubles up to. The cap sits below the closed-market
+# heartbeat interval so a long outage still re-checks on a sane cadence.
+RETRY_BACKOFF_BASE_SECONDS = 30.0
+RETRY_BACKOFF_MAX_SECONDS = 900.0
+
+
 def run_live_loop(config: AppConfig) -> None:
     db = DatabaseManager(config.database.url)
     db.init_db()
@@ -120,19 +127,45 @@ def run_live_loop(config: AppConfig) -> None:
         type(calendar).__name__,
     )
 
+    consecutive_failures = 0
     try:
         while True:
-            now = datetime.now(timezone.utc)
-            if not calendar.is_open(now):
-                sleep_seconds = _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now)
-                time.sleep(sleep_seconds)
-                continue
+            try:
+                now = datetime.now(timezone.utc)
+                if not calendar.is_open(now):
+                    sleep_seconds = _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now)
+                    consecutive_failures = 0
+                    time.sleep(sleep_seconds)
+                    continue
 
-            _run_cycle(
-                config, db, provider, market_data, news_provider, sentiment_scorer,
-                strategy, risk_manager, executor, portfolio,
-            )
-            time.sleep(config.polling_interval_seconds)
+                _run_cycle(
+                    config, db, provider, market_data, news_provider, sentiment_scorer,
+                    strategy, risk_manager, executor, portfolio,
+                )
+                consecutive_failures = 0
+                time.sleep(config.polling_interval_seconds)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                # A transient outage - a DNS blip, an Alpaca 5xx, a dropped
+                # connection - must not kill the process. calendar.is_open()
+                # and calendar.next_open() are unguarded network calls, so
+                # before this a single failed lookup propagated straight out
+                # of main() and the container died; restart:unless-stopped
+                # then papered over it (336 restarts in production). Back off
+                # and retry instead, and only log the traceback on the first
+                # failure of a streak so a long outage does not flood the log.
+                consecutive_failures += 1
+                backoff = min(
+                    RETRY_BACKOFF_BASE_SECONDS * (2 ** (consecutive_failures - 1)),
+                    RETRY_BACKOFF_MAX_SECONDS,
+                )
+                logger.warning(
+                    "Live loop iteration failed (%d consecutive): %s. Retrying in %.0fs.",
+                    consecutive_failures, exc, backoff,
+                    exc_info=(consecutive_failures == 1),
+                )
+                time.sleep(backoff)
     except KeyboardInterrupt:
         logger.info("StockBot stopped by user.")
 
