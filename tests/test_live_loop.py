@@ -120,3 +120,105 @@ def test_heartbeat_survives_a_data_outage(tmp_path):
         config, db, _BrokenMarketData(), portfolio, AlwaysOpenCalendar(), NOW
     )
     assert sleep_seconds > 0  # did not raise
+
+
+class _FlakyCalendar:
+    """Fails `failures` times, then raises KeyboardInterrupt so the loop
+    under test exits instead of spinning forever."""
+
+    def __init__(self, failures: int):
+        self._failures = failures
+        self.calls = 0
+
+    def is_open(self, now):
+        self.calls += 1
+        if self.calls <= self._failures:
+            raise ConnectionError("simulated DNS failure")
+        raise KeyboardInterrupt
+
+
+def _live_loop_config(tmp_path) -> AppConfig:
+    return AppConfig(
+        symbols=["AAPL"],
+        log_file=None,
+        data=DataConfig(provider="synthetic", market_calendar="always_open"),
+        database=DatabaseConfig(url=f"sqlite:///{tmp_path}/test.db"),
+    )
+
+
+def test_live_loop_survives_a_transient_outage_instead_of_exiting(tmp_path, monkeypatch):
+    """A failed network call inside the loop must not escape run_live_loop.
+
+    Regression test: the loop's only handler used to be `except
+    KeyboardInterrupt`, so one failed calendar.is_open() - an unguarded
+    network call made every iteration - propagated straight out of main()
+    and killed the process. Docker's restart policy hid it behind 336
+    restarts in production before anyone noticed."""
+    calendar = _FlakyCalendar(failures=3)
+    monkeypatch.setattr(main, "build_market_calendar", lambda config: calendar)
+    monkeypatch.setattr(main.time, "sleep", lambda seconds: None)
+
+    main.run_live_loop(_live_loop_config(tmp_path))  # must return, not raise
+
+    assert calendar.calls == 4  # 3 failures retried, then the clean exit
+
+
+def test_live_loop_backs_off_exponentially_up_to_the_cap(tmp_path, monkeypatch):
+    """Retries must back off rather than hammer a service that's already
+    struggling, and must stop doubling at the configured ceiling."""
+    calendar = _FlakyCalendar(failures=8)
+    monkeypatch.setattr(main, "build_market_calendar", lambda config: calendar)
+
+    sleeps: list = []
+    monkeypatch.setattr(main.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    main.run_live_loop(_live_loop_config(tmp_path))
+
+    base, cap = main.RETRY_BACKOFF_BASE_SECONDS, main.RETRY_BACKOFF_MAX_SECONDS
+    assert sleeps == [base, base * 2, base * 4, base * 8, base * 16, cap, cap, cap]
+
+
+def test_live_loop_resets_backoff_after_a_success(tmp_path, monkeypatch):
+    """A recovered connection must not stay penalised by earlier failures."""
+
+    class _RecoveringCalendar:
+        def __init__(self):
+            self.calls = 0
+
+        def is_open(self, now):
+            self.calls += 1
+            if self.calls in (1, 2):
+                raise ConnectionError("simulated DNS failure")
+            if self.calls == 3:
+                return False  # recovered - closed-market heartbeat runs
+            if self.calls == 4:
+                raise ConnectionError("simulated DNS failure")
+            raise KeyboardInterrupt
+
+        def next_open(self, now):
+            return now + timedelta(minutes=5)
+
+    calendar = _RecoveringCalendar()
+    monkeypatch.setattr(main, "build_market_calendar", lambda config: calendar)
+
+    sleeps: list = []
+    monkeypatch.setattr(main.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    main.run_live_loop(_live_loop_config(tmp_path))
+
+    base = main.RETRY_BACKOFF_BASE_SECONDS
+    # two failures, the heartbeat's own sleep, then a failure back at base
+    assert sleeps[0] == base
+    assert sleeps[1] == base * 2
+    assert sleeps[3] == base
+
+
+def test_live_loop_still_stops_on_keyboard_interrupt(tmp_path, monkeypatch):
+    """The retry wrapper must not swallow Ctrl-C."""
+    calendar = _FlakyCalendar(failures=0)
+    monkeypatch.setattr(main, "build_market_calendar", lambda config: calendar)
+    monkeypatch.setattr(main.time, "sleep", lambda seconds: None)
+
+    main.run_live_loop(_live_loop_config(tmp_path))
+
+    assert calendar.calls == 1  # exited immediately, no retry

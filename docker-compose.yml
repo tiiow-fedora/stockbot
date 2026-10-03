@@ -17,6 +17,13 @@ services:
   stockbot:
     build: .
     restart: unless-stopped
+    # The host has a single resolver (1.1.1.1), which Docker's embedded
+    # DNS inherits as its only upstream - one blip there and every lookup
+    # fails. List a second resolver so a single upstream hiccup is not an
+    # outage. Container-name lookups (postgres) still go via 127.0.0.11.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy
