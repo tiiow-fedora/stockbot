@@ -89,20 +89,33 @@ class AlpacaMarketDataProvider(MarketDataProvider):
         except Exception as exc:  # network/auth/rate-limit failures
             raise MarketDataError(f"Alpaca historical bars request failed for {symbol}: {exc}") from exc
 
+        try:
+            raw_bars = bars[symbol]
+        except KeyError:
+            # alpaca-py's BarSet raises KeyError for a symbol with no bars in
+            # the window (halted, delisted, bad ticker). Treat as "no data"
+            # so callers see MarketDataError from get_snapshot, not KeyError.
+            return []
+
         candles: List[Candle] = []
-        for bar in bars[symbol]:
-            candles.append(
-                Candle(
-                    symbol=symbol,
-                    timestamp=bar.timestamp,
-                    open=float(bar.open),
-                    high=float(bar.high),
-                    low=float(bar.low),
-                    close=float(bar.close),
-                    volume=int(bar.volume),
-                    timeframe=timeframe,
+        for bar in raw_bars:
+            try:
+                candles.append(
+                    Candle(
+                        symbol=symbol,
+                        timestamp=bar.timestamp,
+                        open=float(bar.open),
+                        high=float(bar.high),
+                        low=float(bar.low),
+                        close=float(bar.close),
+                        volume=int(bar.volume),
+                        timeframe=timeframe,
+                    )
                 )
-            )
+            except (ValueError, TypeError) as exc:
+                # One malformed bar (zero/NaN price, high < low) must not
+                # discard the symbol's whole history.
+                logger.warning("Skipping malformed %s bar at %s: %s", symbol, getattr(bar, "timestamp", "?"), exc)
         return candles
 
     def get_snapshot(self, symbol: str) -> MarketSnapshot:

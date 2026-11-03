@@ -201,6 +201,19 @@ def _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now: d
     return sleep_seconds
 
 
+def _completed_history(history, snapshot, timeframe: str):
+    """Candles strictly before the one the snapshot represents.
+
+    For daily bars the provider builds the snapshot from today's still-forming
+    bar, which is ALSO the last element of the fetched history (its timestamp
+    is the session start, earlier than `now`). Keeping it made the strategy see
+    today's price and volume twice and made live disagree with the backtester,
+    which uses bars[:i] as history and bar i as the snapshot."""
+    if timeframe == "1Day":
+        return [c for c in history if c.timestamp.date() < snapshot.timestamp.date()]
+    return [c for c in history if c.timestamp < snapshot.timestamp]
+
+
 def _run_cycle(
     config, db, provider, market_data, news_provider, sentiment_scorer, strategy, risk_manager, executor, portfolio
 ) -> None:
@@ -222,12 +235,19 @@ def _run_cycle(
 
     # Protective exits first, across every symbol currently held.
     for order in risk_manager.check_stop_loss_take_profit(portfolio, prices):
-        route_order(order, risk_manager, portfolio, executor, prices, prices[order.symbol], order.timestamp, db)
+        # Guarded per order: an exception here (executor/DB hiccup on one
+        # symbol) used to escape _run_cycle, skipping every other exit and
+        # every strategy decision this cycle - and since the same stop-loss
+        # fires again next cycle, it could wedge the whole loop indefinitely.
+        try:
+            route_order(order, risk_manager, portfolio, executor, prices, prices[order.symbol], order.timestamp, db)
+        except Exception:
+            logger.exception("Protective exit for %s failed this cycle; will retry next cycle", order.symbol)
 
     for symbol, snapshot in snapshots.items():
         try:
             history = market_data.get_history(symbol, config.data.history_lookback_days, config.data.timeframe)
-            history = [c for c in history if c.timestamp < snapshot.timestamp]
+            history = _completed_history(history, snapshot, config.data.timeframe)
 
             news_start = snapshot.timestamp - timedelta(days=1)
             news = news_provider.get_news(symbol, news_start, snapshot.timestamp)
