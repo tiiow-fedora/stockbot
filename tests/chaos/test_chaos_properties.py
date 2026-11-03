@@ -158,3 +158,33 @@ def test_shipped_config_and_defaults_still_validate():
         ExecutionConfig(slippage_bps=-5)
     with pytest.raises(Exception):
         ExecutionConfig(commission_pct=1.5)
+
+
+# -- backtester under hostile series ----------------------------------------------------------
+
+@pytest.mark.parametrize("seed", range(30))
+@pytest.mark.parametrize("strategy", ["technical", "mean_reversion"])
+def test_backtester_survives_gappy_jumpy_series(seed, strategy):
+    from datetime import timedelta
+
+    from backtesting.engine import Backtester
+    from core.config import ExecutionConfig, StrategyConfig
+    from core.models import Candle
+    from strategy.registry import build_strategy_by_name
+
+    rng = random.Random(seed)
+    price, ts, candles = 100.0, datetime(2023, 1, 2, tzinfo=timezone.utc), []
+    for _ in range(rng.choice([45, 90, 250])):
+        move = rng.gauss(0, 0.02) + (rng.choice([-0.35, 0.4]) if rng.random() < 0.03 else 0)
+        o = price * (1 + rng.gauss(0, 0.01))
+        c = max(0.05, price * (1 + move))
+        hi, lo = max(o, c) * 1.01, min(o, c) * 0.99
+        candles.append(Candle("X", ts, o, hi, lo, c, rng.choice([0, 10**5, 10**7])))
+        price = c
+        ts += timedelta(days=rng.choice([1, 1, 1, 1, 3, 7]))      # weekends / multi-day holes
+    bt = Backtester(build_strategy_by_name(strategy, StrategyConfig(name=strategy)), RiskConfig(),
+                    ExecutionConfig(slippage_bps=rng.choice([0, 5, 50]), commission_per_trade=rng.choice([0, 1])),
+                    warmup_bars=40)
+    res = bt.run("X", candles)
+    assert math.isfinite(res.total_return_pct) and res.ending_balance > 0
+    assert all(v > 0 for _, v in res.equity_curve)
