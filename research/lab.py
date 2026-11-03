@@ -4,6 +4,8 @@ Strategy comparison runner + CLI.
     python -m research.lab compare            # every strategy x every synthetic scenario
     python -m research.lab compare --bars 750 --seed 3 --markdown out.md --json out.json
     python -m research.lab list               # registered strategies by family
+    python -m research.lab walkforward --strategy donchian_breakout --scenario random_walk
+    python -m research.lab montecarlo  --strategy donchian_breakout --scenario uptrend
 
 ``compare`` runs each strategy through the REAL engine (``research.harness``) on the
 synthetic scenario suite plus a cointegrated-pair scenario, and prints Sharpe,
@@ -99,6 +101,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--strategy", action="append", help="restrict to these strategies (repeatable)")
     c.add_argument("--markdown", help="write markdown tables here")
     c.add_argument("--json", help="write JSON metrics here")
+    for cmd, helptext in (("walkforward", "walk-forward optimise one strategy on one scenario"),
+                          ("montecarlo", "Monte Carlo robustness report for one strategy on one scenario")):
+        w = sub.add_parser(cmd, help=helptext)
+        w.add_argument("--strategy", required=True, choices=sorted(STRATEGIES))
+        w.add_argument("--scenario", default="random_walk")
+        w.add_argument("--bars", type=int, default=600)
+        w.add_argument("--seed", type=int, default=0)
+        if cmd == "walkforward":
+            w.add_argument("--train", type=int, default=200)
+            w.add_argument("--test", type=int, default=60)
+            w.add_argument("--anchored", action="store_true")
+            w.add_argument("--objective", default="sharpe", choices=["sharpe", "sortino", "calmar", "total_return"])
+        else:
+            w.add_argument("--sims", type=int, default=200)
     args = ap.parse_args(argv)
 
     if args.cmd == "list":
@@ -106,6 +122,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"{fam}:")
             for n in names:
                 print(f"  {n:28s} {STRATEGIES[n].description}")
+        return 0
+
+    if args.cmd in ("walkforward", "montecarlo"):
+        scen = {sc.name: sc for sc in build_scenarios(args.bars, args.seed)}
+        if args.scenario not in scen:
+            ap.error(f"unknown scenario {args.scenario!r}; choose from {sorted(scen)}")
+        sc = scen[args.scenario]
+        if args.cmd == "walkforward":
+            from research.walkforward import WalkForwardConfig, WalkForwardOptimizer
+
+            cfg = WalkForwardConfig(train_bars=args.train, test_bars=args.test, anchored=args.anchored,
+                                    objective=args.objective, warmup_bars=60)
+            kw = {"partner": sc.partner} if STRATEGIES[args.strategy].requires_partner else {}
+            print(WalkForwardOptimizer(STRATEGIES[args.strategy], cfg=cfg, **kw).run(sc.candles).summary())
+        else:
+            from research.montecarlo import monte_carlo_report
+
+            rep = monte_carlo_report(lambda: make_strategy(args.strategy, sc), sc.candles,
+                                     strategy_cls=STRATEGIES[args.strategy], n_sims=args.sims, seed=args.seed)
+            print(rep["text"])
         return 0
 
     matrix = run_matrix(args.strategy, args.bars, args.seed)
