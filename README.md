@@ -36,6 +36,7 @@ stockbot/
 ├── backtesting/       # engine.py (no-lookahead sim), compare.py, optimize.py (grid search)
 ├── database/          # database.py: SQLAlchemy models (SQLite or Postgres)
 ├── dashboard/          # app.py: read-only FastAPI dashboard + static/index.html
+├── observability/     # metrics, JSON logs, health checks, graceful shutdown, config validation (docs/observability.md)
 ├── tests/             # pytest suite
 ├── main.py            # CLI: run / backtest [--compare] / optimize / init-db / dashboard
 ├── Dockerfile, docker-compose.yml

@@ -1,0 +1,49 @@
+# Optional monitoring stack. Use alongside the main file:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+# Grafana: http://localhost:3000 (admin/admin - change it), dashboard "StockBot (paper trading)".
+services:
+  stockbot:
+    environment:
+      LOG_FORMAT: json
+      METRICS_PORT: "9108"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9108/healthz', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    # Give the loop time to finish a cycle after SIGTERM before SIGKILL.
+    stop_grace_period: 60s
+
+  dashboard:
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/stockbot-dashboard.json:/var/lib/grafana/dashboards/stockbot-dashboard.json:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  prometheus_data:
+  grafana_data:
