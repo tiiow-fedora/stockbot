@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 
 import pytest
+from pydantic import ValidationError
 
 from core.config import AppConfig, DataConfig, ExecutionConfig, RiskConfig, StrategyConfig
 from observability import metrics
@@ -35,7 +36,13 @@ def test_shipped_config_is_valid():
 
 
 def test_percent_typo_is_caught():
-    assert "risk.max_position_size_pct" in errs(AppConfig(risk=RiskConfig(max_position_size_pct=20), **SYNTH))
+    # RiskConfig now rejects non-fraction values at construction time (units
+    # audit); validate_config remains the backstop for configs built another way.
+    with pytest.raises(ValidationError, match="max_position_size_pct"):
+        RiskConfig(max_position_size_pct=20)
+    cfg = AppConfig(risk=RiskConfig(), **SYNTH)
+    object.__setattr__(cfg.risk, "max_position_size_pct", 20)
+    assert "risk.max_position_size_pct" in errs(cfg)
 
 
 def test_unknown_modes_and_providers():
