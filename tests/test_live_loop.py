@@ -222,3 +222,31 @@ def test_live_loop_still_stops_on_keyboard_interrupt(tmp_path, monkeypatch):
     main.run_live_loop(_live_loop_config(tmp_path))
 
     assert calendar.calls == 1  # exited immediately, no retry
+
+
+def test_live_loop_exits_cleanly_when_shutdown_requested_mid_cycle(tmp_path, monkeypatch):
+    """SIGTERM during a cycle must finish that cycle and exit; not loop on."""
+    import observability.shutdown as sd
+
+    holder = {}
+    orig_init = sd.GracefulShutdown.__init__
+
+    def spy(self):
+        orig_init(self)
+        holder["g"] = self
+
+    monkeypatch.setattr(sd.GracefulShutdown, "__init__", spy)
+    monkeypatch.setenv("METRICS_PORT", "0")
+
+    class _Cal:
+        def is_open(self, now):
+            holder["g"].request()  # signal arrives during the iteration
+            return True
+
+    cycles = []
+    monkeypatch.setattr(main, "build_market_calendar", lambda config: _Cal())
+    monkeypatch.setattr(main, "_run_cycle", lambda *a, **k: cycles.append(1))
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+
+    main.run_live_loop(_live_loop_config(tmp_path))
+    assert len(cycles) == 1
