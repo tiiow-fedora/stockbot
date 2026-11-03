@@ -1,0 +1,6 @@
+[
+ {"symbol":"AAPL","form":"8-K","title":"Results of operations","accepted":"2024-03-04T21:05:00Z","excerpt":"Record revenue and profit; board approved a buyback authorization.","url":"https://example.test/f/1"},
+ {"symbol":"AAPL","form":"10-Q","title":"Quarterly report","accepted":"2024-03-06T21:00:00Z","excerpt":"Management identified a material weakness and an impairment charge.","url":"https://example.test/f/2"},
+ {"symbol":"MSFT","form":"8-K","title":"Entry into agreement","accepted":"2024-03-05T13:00:00Z","excerpt":"Partnership announced."},
+ {"symbol":"AAPL","form":"8-K","title":"No acceptance time","excerpt":"dropped"}
+]

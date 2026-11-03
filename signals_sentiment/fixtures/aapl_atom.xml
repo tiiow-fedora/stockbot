@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>AAPL atom (fixture)</title>
+<entry><title>Apple stock rallies after upgrade</title><link href="https://example.test/aapl/5"/>
+<updated>2024-03-07T10:00:00Z</updated><summary>Analysts turn bullish.</summary></entry>
+</feed>

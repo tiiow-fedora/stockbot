@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>AAPL news (fixture)</title>
+<item><title>Apple beats earnings expectations, shares surge on record profit</title>
+<link>https://example.test/aapl/1</link><pubDate>Mon, 04 Mar 2024 14:00:00 GMT</pubDate>
+<description>&lt;p&gt;Strong &lt;b&gt;growth&lt;/b&gt; in services.&lt;/p&gt;</description></item>
+<item><title>Apple faces lawsuit and investigation over app store</title>
+<link>https://example.test/aapl/2</link><pubDate>Tue, 05 Mar 2024 09:30:00 -0500</pubDate>
+<description>Regulators raise concerns.</description></item>
+<item><title>Apple to host developer conference</title>
+<link>https://example.test/aapl/3</link><pubDate>Wed, 06 Mar 2024 12:00:00 GMT</pubDate></item>
+<item><title>Undated item must be dropped</title><link>https://example.test/aapl/4</link></item>
+</channel></rss>
