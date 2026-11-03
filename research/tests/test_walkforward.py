@@ -263,7 +263,7 @@ class TestSelection:
         r = opt(cfg).run(c)
         assert all(w.is_score <= 0 for w in r.active)
         for name in ("sortino", "calmar", "total_return"):
-            opt(WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=name)).run(c)
+            opt(WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=name), None, LagMomentum).run(c)
 
     def test_nan_objective_is_minus_inf_and_skips_window(self):
         rep = metrics.PerformanceReport()

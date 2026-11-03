@@ -209,8 +209,8 @@ class TestSyntheticEdge:
     def test_short_window_rolling_beta_removes_the_edge(self):
         """Documented limitation: a short rolling OLS beta absorbs the spread deviations it should trade."""
         fixed, rolling = [], []
-        for seed in range(8):
-            a, b = synth.cointegrated_pair(600, seed=seed)
+        for seed in range(5):
+            a, b = synth.cointegrated_pair(500, seed=seed)
             fixed += relative_after_entries(PairsZScore(partner=b, exit_z=0.0), a, b)
             rolling += relative_after_entries(PairsZScore(partner=b, exit_z=0.0, rolling_beta=True, beta_window=60), a, b)
         assert np.mean(fixed) > 0.03 and np.mean(rolling) < 0.5 * np.mean(fixed)

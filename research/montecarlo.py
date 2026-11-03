@@ -234,7 +234,7 @@ def bootstrap_trades(
     equity = np.concatenate([np.full((n_sims, 1), starting_equity), starting_equity + np.cumsum(draws, axis=1)], axis=1)
     final = equity[:, -1]
     mdd = _max_dd_matrix(equity)
-    ruined = equity.min(axis=1) < ruin_level * starting_equity
+    ruined = equity[:,-1] < ruin_level * starting_equity
     return _summary(
         "bootstrap_trades", "final_equity", final, float(np.mean(final < starting_equity)),
         percentiles=percentiles, prob_ruin=float(np.mean(ruined)),
