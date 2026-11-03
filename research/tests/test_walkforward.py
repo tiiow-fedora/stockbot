@@ -255,21 +255,21 @@ class TestSelection:
 
     def test_deterministic(self):
         c = synth.gbm(350, seed=4)
-        a, b = opt().run(c), opt().run(c)
+        a, b = opt(cfg=CFG, grid=SMALL_LAG, cls=LagMomentum).run(c), opt(cfg=CFG, grid=SMALL_LAG, cls=LagMomentum).run(c)
         assert [w.params for w in a.windows] == [w.params for w in b.windows]
         assert np.array_equal(a.equity, b.equity)
 
     def test_ties_resolve_to_first_in_grid_order(self):
         """A constant objective ties every candidate: the earliest grid cell must win every window."""
         cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=lambda r: 1.0)
-        o = opt(cfg)
+        o = opt(cfg, SMALL_LAG, LagMomentum)
         res = o.run(synth.gbm(350, seed=4))
         assert res.n_skipped == 0 and all(w.params == o.combos[0] for w in res.windows)
 
     def test_custom_objective_callable_and_name(self):
         c = synth.trending(350, 0.004, 0.006, seed=1)
         cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=lambda r: -r.max_drawdown)
-        r = opt(cfg).run(c)
+        r = opt(cfg, SMALL_LAG, LagMomentum).run(c)
         assert all(w.is_score <= 0 for w in r.active)
         for name in ("sortino", "calmar", "total_return"):
             opt(WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=name), SMALL_LAG, LagMomentum).run(c)

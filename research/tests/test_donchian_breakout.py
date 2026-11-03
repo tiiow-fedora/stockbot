@@ -110,3 +110,10 @@ class TestBoundaries:
         bars = Bars("T", list(range(31)), b.open, b.high, b.low, b.close, vol)
         assert s24.signal(bars, False).kind.value == "ENTER"
         assert s26.signal(bars, False).kind.value == "HOLD"
+
+    def test_equal_to_channel_edge_is_neither_breakout_nor_breakdown(self):
+        c = np.asarray([100.0] * 30 + [100.0])
+        flat_bars = Bars("T", list(range(31)), c, c, c, c, np.full(31, 1e6))
+        s = DonchianBreakout(entry_period=10, exit_period=5)
+        assert s.signal(flat_bars, False).kind.value == "HOLD"   # close == 10-bar high
+        assert s.signal(flat_bars, True).kind.value == "HOLD"    # close == 5-bar low

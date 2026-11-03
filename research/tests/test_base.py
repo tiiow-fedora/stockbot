@@ -251,3 +251,31 @@ class TestLookbackEquivalence:
         for i in range(a.min_bars, 400, 3):
             for pos in (False, True):
                 assert decide(a, c, i, pos).action == decide(b, c, i, pos).action
+
+
+class TestIntegerParamEnforcement:
+    @pytest.mark.parametrize("bad", [2.5, 3.0, True, "5", None])
+    def test_int_fields_reject_non_integers(self, bad):
+        @dataclass(frozen=True)
+        class P(StrategyParams):
+            period: int = 5
+
+        with pytest.raises(ValueError, match="integer"):
+            P(period=bad)
+
+    def test_numpy_ints_accepted_and_float_fields_unaffected(self):
+        @dataclass(frozen=True)
+        class P(StrategyParams):
+            period: int = 5
+            x: float = 1.0
+
+        assert P(period=np.int64(7), x=2).period == 7
+
+    def test_every_registered_strategy_rejects_float_periods(self):
+        from research.registry import STRATEGIES
+
+        for cls in STRATEGIES.values():
+            ints = [k for k, v in cls.PARAMS().to_dict().items() if type(v) is int]
+            assert ints
+            with pytest.raises(ValueError):
+                cls.PARAMS(**{ints[0]: cls.PARAMS().to_dict()[ints[0]] + 0.5})

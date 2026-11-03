@@ -20,6 +20,7 @@ ENTER  (flat) direction == +1 AND close > line AND age <= ``max_age``
        tolerates a missed fill or a stop-out re-entry), but we do NOT chase an
        old uptrend that is already more than ``max_age`` bars in progress.
 EXIT   (long) direction == -1 (close fell through the line)
+``mult`` must be finite and > 0 (NaN/inf are rejected).
 Signal strength is 0.5 + 0.5 * clip(distance / (2 * mult ATR), 0, 1) where
 distance = close - line, so conviction grows with room above the stop line.
 

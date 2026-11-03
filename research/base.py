@@ -66,6 +66,13 @@ class StrategyParams:
     """
 
     def __post_init__(self) -> None:
+        # Fields annotated ``int`` must hold real ints (not 2.5, not True): a float period would
+        # pass range checks and only blow up later inside numpy slicing at signal time.
+        for f in dataclasses.fields(self):
+            if f.type in (int, "int"):
+                v = getattr(self, f.name)
+                if isinstance(v, bool) or not isinstance(v, (int, np.integer)):
+                    raise ValueError(f"{f.name} must be an integer, got {v!r}")
         self.validate()
 
     def validate(self) -> None:  # pragma: no cover - default is permissive

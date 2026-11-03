@@ -18,6 +18,7 @@ ENTER  EMA(fast) > EMA(mid) > EMA(slow)
 EXIT   EMA(fast) < EMA(mid)
 Exit is deliberately looser than entry (only the fast/mid pair must break) so a
 trade is not cut by the separation or slope filters that merely gate entries.
+``min_separation_atr`` must be finite and >= 0 (NaN would silently disable the filter).
 Signal strength is 0.5 + 0.5 * clip(separation / (4 ATR), 0, 1).
 
 Expected behaviour
