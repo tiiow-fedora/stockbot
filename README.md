@@ -107,7 +107,7 @@ weights, or risk limits.
 pytest
 ```
 
-140 tests across indicators, scoring, portfolio accounting, risk limits,
+183 tests across indicators, scoring, portfolio accounting, risk limits,
 execution (slippage/commission, the Alpaca mirror executor, and the
 live-loop market-hours heartbeat - all mocked, not live), backtesting
 (including an explicit no-look-ahead check and optional-news bounds),
@@ -226,17 +226,38 @@ limits, execution costs, database URL, polling interval. Secrets
   Verified live against the real closed market: correctly logged "Market
   closed - next open 2026-08-12T09:30:00-04:00" and skipped trading.
 
+## Classroom simulator adapter (Milestone 6)
+
+Platform-agnostic, paper-only, no network or credentials:
+
+- `data.provider: class_simulator` reads quotes from a JSON file
+  (`data.class_simulator_quotes_path`) and history from the CSV dir; the
+  file contract and units (dollars per share, shares-so-far volume) are in
+  `data/providers/class_simulator.py`.
+- `execution.mode: class_simulator` appends whole-share order tickets to a
+  CSV outbox (`execution.class_simulator_outbox`) for you to place on the
+  platform. Like `manual`, it never fills locally, and tickets are
+  idempotent across restarts.
+- Set `data.market_calendar: always_open` (or `us_equity`) as appropriate.
+
+## Unit-consistency guarantees
+
+Regression tests in `tests/test_units.py`: snapshot volume must be in the
+same unit as daily history volume (today's partial Alpaca bar is projected
+to a full day and excluded from history so it isn't duplicated); volume 0
+means "unavailable", not a collapse; `*_pct` risk settings are fractions
+(0.08 = 8%) and are validated; `slippage_bps` is basis points; order
+quantities are whole shares.
+
 ## Limitations / not yet built
 
 - **Portfolio state is in-memory per process** - restarting `main.py run`
   starts a fresh paper portfolio at `starting_balance`. Snapshots are
   persisted to the DB for audit, but the live loop doesn't yet reload the
   last snapshot on startup. Worth fixing before a long unattended run.
-- **No classroom platform adapter yet** - intentionally deferred until
-  the platform is known (Milestone 6). The interfaces it will implement
-  (`MarketDataProvider`, `OrderExecutor`) already exist and are exercised
-  by two other providers each, so the adapter should be a small, isolated
-  addition.
+- **Classroom adapter is file-based, not a vendor API** (Milestone 6) -
+  see "Classroom simulator adapter" below. A direct API integration is
+  still future work once the platform is known.
 - **Single-symbol-per-run backtester** - `main.py backtest` loops over
   symbols and reports each individually plus an average; there's no
   portfolio-level multi-symbol backtest (shared cash across symbols
