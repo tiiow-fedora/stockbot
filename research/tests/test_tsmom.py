@@ -170,3 +170,41 @@ class TestSyntheticEdge:
         """Honest negative: trailing return flips sign with no follow-through in an OU series."""
         r = run_backtest(Tsmom(), synth.mean_reverting(500, 8.0, 0.012, seed=seed))
         assert r.report.total_return < 0.05
+
+
+class TestReviewFixes:
+    """Defects found in review."""
+
+    def test_flat_tape_does_not_trap_a_losing_position(self):
+        """Crash followed by vol_window dead-flat bars: vol == 0, but the 20-bar return is -20%."""
+        flat = bars_from_closes([100.0] * 40 + [80.0] * 20)
+        s = Tsmom(**SMALL)
+        sig = s.signal(flat, True)
+        assert sig.indicators["vol"] == 0.0 and sig.indicators["mom"] < 0
+        assert sig.kind.value == "EXIT"
+
+    def test_flat_tape_still_never_enters(self):
+        flat = bars_from_closes([80.0] * 40 + [100.0] * 20)  # positive momentum, zero vol -> no strength basis
+        assert Tsmom(**SMALL).signal(flat, False).kind.value == "HOLD"
+
+    def test_zero_momentum_is_not_an_exit(self):
+        c = bars_from_closes(path_with_momentum(0.0))
+        sig = Tsmom(**SMALL).signal(c, True)
+        assert sig.indicators["mom"] == 0.0 and sig.kind.value == "HOLD"
+
+    def test_entry_requires_strictly_exceeding_hurdle(self):
+        c = bars_from_closes(path_with_momentum(0.05))
+        mom = Tsmom(**SMALL).signal(c, False).indicators["mom"]
+        assert Tsmom(**{**SMALL, "hurdle": mom}).signal(c, False).kind.value == "HOLD"
+
+    def test_strength_is_vol_scaled_tstat(self):
+        sig = Tsmom(**SMALL).signal(bars_from_closes(path_with_momentum(0.05)), False)
+        i = sig.indicators
+        t = i["mom"] / (i["vol"] * np.sqrt(SMALL["lookback"]))
+        assert 0.05 < t < 2  # unsaturated, so the sqrt(lookback) scale is really exercised
+        assert sig.strength == pytest.approx(np.tanh(t))
+
+    @pytest.mark.parametrize("hurdle", [float("nan"), float("inf")])
+    def test_rejects_nan_and_inf_hurdle(self, hurdle):
+        with pytest.raises(ValueError):
+            TsmomParams(hurdle=hurdle)

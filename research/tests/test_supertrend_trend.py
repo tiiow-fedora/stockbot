@@ -130,3 +130,10 @@ class TestSyntheticEdge:
         strict = run_backtest(SuperTrendTrend(max_age=1), c).report.avg_exposure
         loose = run_backtest(SuperTrendTrend(max_age=200), c).report.avg_exposure
         assert strict < loose
+
+
+class TestReviewFixes:
+    @pytest.mark.parametrize("mult", [float("nan"), float("inf")])
+    def test_rejects_nan_and_inf_mult(self, mult):
+        with pytest.raises(ValueError):
+            SuperTrendParams(mult=mult)

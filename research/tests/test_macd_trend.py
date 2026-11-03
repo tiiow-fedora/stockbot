@@ -155,3 +155,16 @@ class TestSyntheticEdge:
         trades, still_open = simulate_long_flat(MacdTrend(), synth.candles_from_closes(closes, seed=1))
         assert trades and not still_open
         assert trades[-1][1] > up  # the position carried through the top is only sold after it
+
+
+class TestReviewFixes:
+    def test_strength_formula(self):
+        s = MacdTrend(slope_confirm=False)
+        checked = 0
+        for _, g in signals(s, PULLBACK):
+            if g.kind.value == "ENTER":
+                x = g.indicators["hist"] / (0.1 * g.indicators["atr"])
+                assert g.strength == pytest.approx(0.5 + 0.5 * np.tanh(x))
+                checked += 1
+        assert checked >= 3
+        assert any(0.55 < g.strength < 0.95 for _, g in signals(s, PULLBACK) if g.kind.value == "ENTER")

@@ -157,3 +157,21 @@ class TestSyntheticEdge:
         assert not (r.report.total_return > 0.1 and r.report.win_rate > 0.6)
         cyc = run_backtest(SqueezeBreakout(), synth.range_then_breakout(500, seed=8))
         assert cyc.report.total_return > r.report.total_return
+
+
+class TestBoundaries:
+    def test_squeeze_memory_boundary_is_exact(self):
+        """The squeeze was last ON 2 bars before the decision bar: lookback=2 sees it, lookback=1 not."""
+        closes = QUIET + [100.5, 101.5, 103.0, 105.0, 107.0]
+        assert kind(SqueezeBreakout(squeeze_lookback=2), closes) == "ENTER"
+        assert kind(SqueezeBreakout(squeeze_lookback=1), closes) == "HOLD"
+
+    def test_volume_baseline_excludes_the_decision_bar(self):
+        """Average of the 20 PRIOR bars is 1.0e6; the release bar's own 1.25e6 must not lift it."""
+        closes = QUIET + [100.5, 101.5, 103.0, 105.0]
+        vol = np.full(len(closes), 1e6)
+        vol[-1] = 1.25e6
+        b = mk(closes)
+        bars = Bars("T", list(range(len(closes))), b.open, b.high, b.low, b.close, vol)
+        assert SqueezeBreakout(vol_filter=1.24).signal(bars, False).kind.value == "ENTER"
+        assert SqueezeBreakout(vol_filter=1.26).signal(bars, False).kind.value == "HOLD"

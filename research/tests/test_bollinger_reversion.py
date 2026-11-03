@@ -163,3 +163,14 @@ class TestSyntheticEdge:
         for seed in (1, 2, 3):
             c = synth.ar1_momentum(500, phi=0.5, sigma=0.01, mu=0.0003, seed=seed)
             assert run_backtest(BollingerReversion(), c).report.total_return < 0.0
+
+
+class TestStrengthValues:
+    def test_strength_is_linear_in_depth_below_the_band(self):
+        s = BollingerReversion()
+        for last in (98.6, 98.0):
+            sig = s.signal(bars_from_closes(wiggle(39) + [last]), False)
+            assert sig.kind.value == "ENTER"
+            assert sig.strength == pytest.approx(min(1.0, 0.5 + 0.5 * (-sig.indicators["z"] - 2.0)))
+        deep = s.signal(bars_from_closes(wiggle(39) + [90.0]), False)
+        assert deep.strength == 1.0

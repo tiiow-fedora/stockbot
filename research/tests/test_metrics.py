@@ -86,6 +86,9 @@ class TestDrawdown:
         eq = np.cumprod(1 + np.random.default_rng(3).normal(0, 0.03, 1000))
         assert 0 <= m.max_drawdown(eq) < 1
 
+    def test_nan_equity_is_nan_not_zero_drawdown(self):
+        assert math.isnan(m.max_drawdown([100, float("nan"), 90]))
+
     def test_ulcer_index(self):
         assert m.ulcer_index([100, 100, 100]) == 0.0
         assert m.ulcer_index([100, 90]) == pytest.approx(math.sqrt(0.5 * 0.1**2))
@@ -128,6 +131,25 @@ class TestExposure:
 
     def test_zero_equity_safe(self):
         assert m.exposure([5.0], [0.0])["avg_exposure"] == 0.0
+
+
+class TestMoreDefinitions:
+    def test_sortino_uses_annual_risk_free_per_bar(self):
+        r = np.array([0.01, -0.02, 0.03, -0.01])
+        ex = r - 0.05 / 252
+        dd = math.sqrt(np.mean(np.minimum(ex, 0) ** 2))
+        assert m.sortino_ratio(r, risk_free=0.05) == pytest.approx(ex.mean() / dd * math.sqrt(252))
+
+    def test_var_is_positive_loss_and_cvar_is_tail_mean(self):
+        r = [-0.10, -0.05, 0.10, 0.20]
+        assert m.value_at_risk(r, 0.75) == pytest.approx(0.0625)  # 25th pct (linear) = -0.0625
+        assert m.conditional_var(r, 0.75) == pytest.approx(0.10)  # only -0.10 lies at/below it
+        assert m.value_at_risk(r, 0.5) == 0.0  # median is a gain: floored, never a negative "loss"
+
+    def test_breakeven_trades_are_not_wins(self):
+        s = m.trade_stats([5.0, 0.0])
+        assert s["win_rate"] == 0.5 and s["profit_factor"] == float("inf") and s["avg_loss"] == 0.0
+        assert math.isnan(m.trade_stats([0.0, 0.0])["profit_factor"])
 
 
 class TestTradeStats:

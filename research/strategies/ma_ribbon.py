@@ -53,8 +53,8 @@ class MARibbonParams(StrategyParams):
             raise ValueError("require fast < mid < slow")
         if self.slope_period < 2 or self.atr_period < 2:
             raise ValueError("slope_period and atr_period must be >= 2")
-        if self.min_separation_atr < 0:
-            raise ValueError("min_separation_atr must be >= 0")
+        if not 0 <= self.min_separation_atr < float("inf"):  # also rejects NaN
+            raise ValueError("min_separation_atr must be finite and >= 0")
 
 
 class MARibbon(ResearchStrategy):

@@ -58,7 +58,7 @@ class RelativeStrengthParams(StrategyParams):
     def validate(self) -> None:
         if self.rs_period < 2:
             raise ValueError("rs_period must be >= 2")
-        if self.margin < 0 or self.hysteresis < 0:
+        if not (np.isfinite(self.margin) and np.isfinite(self.hysteresis)) or self.margin < 0 or self.hysteresis < 0:
             raise ValueError("margin and hysteresis must be >= 0")
 
 
@@ -86,7 +86,7 @@ class RelativeStrength(ResearchStrategy):
         p = self.params
         partner = _partner.align_partner(self._partner, bars.timestamps)
         own = np.asarray(bars.close, float)
-        if not ind.last_finite(partner[-1], partner[-1 - p.rs_period], own[-1], own[-1 - p.rs_period]):
+        if not (ind.last_finite(partner[-1], partner[-1 - p.rs_period], own[-1], own[-1 - p.rs_period]) and own[-1 - p.rs_period] > 0):
             return Signal.hold("partner or own price unavailable", close=own[-1])
         r_self = own[-1] / own[-1 - p.rs_period] - 1.0
         r_peer = partner[-1] / partner[-1 - p.rs_period] - 1.0

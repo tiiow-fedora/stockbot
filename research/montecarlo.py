@@ -20,9 +20,12 @@ of the result is skill and how much is luck / path / parameter fit:
 ``monte_carlo_report``       runs the sensible subset for one strategy + candles.
 
 Determinism: every function takes an explicit ``seed``; all randomness comes from
-``np.random.default_rng``. Multi-simulation runs draw one independent child stream
-per simulation via ``SeedSequence.spawn`` so simulation ``k`` does not depend on
-``n_sims`` (the first k sims of a longer run equal a shorter run).
+``np.random.default_rng`` (no global RNG). The engine-based runs (``price_path_
+robustness``, ``parameter_perturbation``) draw one independent child stream per
+simulation via ``SeedSequence.spawn``, so simulation ``k`` does not depend on
+``n_sims``. The vectorised samplers (trade / return bootstrap, permutation) fill one
+matrix from a single stream: reproducible for a given (seed, n_sims), but changing
+``n_sims`` changes every simulation.
 
 Caveats worth remembering: bootstrapping trades assumes trades are i.i.d. (no
 regime dependence); block bootstraps destroy structure longer than ``block_len``;
@@ -531,7 +534,7 @@ def price_path_robustness(
         f"price_paths[{method}]", "total_return", ret, float(np.mean(ret[np.isfinite(ret)] < 0)) if ok.any() else float("nan"),
         percentiles=percentiles,
         probabilities={"profitable": float(np.mean(ret[ok] > 0)) if ok.any() else float("nan"),
-                       "beats_buy_hold": float(np.mean(ret[ok] >= bench[ok])) if ok.any() else float("nan"),
+                       "beats_buy_hold": float(np.mean(ret[ok] > bench[ok])) if ok.any() else float("nan"),
                        "no_closed_trades": float(np.mean(cols["num_trades"] == 0))},
         extras={k: describe(v, percentiles) for k, v in cols.items() if k != "total_return"},
         meta={"method": method, "block_len": block_len, "seed": seed, "n_bars": len(candles), "real": one(candles)},

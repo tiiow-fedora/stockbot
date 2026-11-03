@@ -162,3 +162,22 @@ class TestSyntheticEdge:
         trades, still_open = simulate_long_flat(HighProximityMomentum(window=60, mom_period=30), c)
         assert not still_open and len(trades) == 1
         assert trades[0][2] > 0.2  # riding the whole slide would have ended below the entry price
+
+
+class TestExactBoundaries:
+    def test_proximity_band_is_inclusive_and_exit_band_exclusive(self):
+        s = small(proximity=0.25, exit_proximity=0.5)
+        closes = [50.0] * 20 + [100.0] + [75.0]
+        assert kind(s, closes) == "ENTER"                       # dist == proximity exactly
+        assert kind(small(proximity=0.24, exit_proximity=0.5), closes) == "HOLD"
+        assert kind(s, [100.0] * 25 + [50.0], in_position=True) == "HOLD"   # dist == exit_proximity: not yet
+        assert kind(s, [100.0] * 25 + [49.9], in_position=True) == "EXIT"
+
+    def test_high_may_be_exactly_recent_bars_old(self):
+        base = [50.0] * 20 + [100.0] + [99.0] * 5      # high set 5 bars before the last bar
+        assert kind(small(recent=5), base) == "ENTER"
+        assert kind(small(recent=4), base) == "HOLD"
+
+    def test_zero_momentum_blocks_entry(self):
+        closes = [100.0] * 25 + [100.0]                 # flat: close == close 10 bars ago
+        assert kind(small(), closes) == "HOLD"

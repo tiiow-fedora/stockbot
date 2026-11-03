@@ -98,3 +98,15 @@ class TestSyntheticEdge:
         r = run_backtest(DonchianBreakout(entry_period=10, exit_period=5), c)
         wins = r.report.win_rate
         assert not (wins > 0.6 and r.report.total_return > 0.2)
+
+
+class TestBoundaries:
+    def test_volume_baseline_excludes_the_breakout_bar(self):
+        """Prior 20-bar average is 1.0e6; the breakout bar's own 1.25e6 must not lift the baseline."""
+        s24, s26 = DonchianBreakout(vol_filter=1.24), DonchianBreakout(vol_filter=1.26)
+        b = bars_from_closes([100.0] * 30 + [105.0])
+        vol = np.full(31, 1e6)
+        vol[-1] = 1.25e6
+        bars = Bars("T", list(range(31)), b.open, b.high, b.low, b.close, vol)
+        assert s24.signal(bars, False).kind.value == "ENTER"
+        assert s26.signal(bars, False).kind.value == "HOLD"

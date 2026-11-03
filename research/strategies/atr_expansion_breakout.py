@@ -19,6 +19,8 @@ ENTER  close > previous close + ``k`` * ATR_prev
        AND true range of the bar > ``expansion`` * ATR_prev
        AND (close - low) / (high - low) >= 1 - ``close_pos`` (close in the top
        ``close_pos`` fraction of the bar's range)
+       AND close >= the Chandelier level below (otherwise the very next bar
+       would sell it: stateless entry/exit must not contradict each other)
 EXIT   close < max(high over the last ``chand_period`` bars, current included)
               - ``chand_mult`` * ATR(``atr_period``)
        (recomputed every bar from visible data, so no stored stop is needed;
@@ -98,9 +100,9 @@ class AtrExpansionBreakout(ResearchStrategy):
         if not ind.last_finite(close, prev_close, atr_now, atr_prev, tr[-1], hh[-1]) or atr_prev <= 0:
             return Signal.hold("indicators not ready", **info)
 
+        level = hh[-1] - p.chand_mult * atr_now
+        info["chandelier"] = level
         if in_position:
-            level = hh[-1] - p.chand_mult * atr_now
-            info["chandelier"] = level
             if close < level:
                 return Signal.exit(1.0, f"close {close:.2f} < Chandelier {level:.2f}", **info)
             return Signal.hold("in trade, above Chandelier", **info)
@@ -115,5 +117,7 @@ class AtrExpansionBreakout(ResearchStrategy):
             return Signal.hold("range not expanded", **info)
         if pos < 1.0 - p.close_pos:
             return Signal.hold("close not near the bar's high", **info)
+        if close < level:
+            return Signal.hold("thrust bar already below the Chandelier, would be sold at once", **info)
         strength = clip01(0.5 + 0.25 * (thrust - p.k))
         return Signal.enter(strength, f"thrust {thrust:.2f} ATR, range {tr[-1] / atr_prev:.2f}x ATR", **info)

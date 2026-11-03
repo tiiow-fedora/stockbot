@@ -162,3 +162,36 @@ class TestSyntheticEdge:
         for seed in (0, 2):
             r = run_backtest(VolRegimeTrend(), synth.mean_reverting(500, half_life=8.0, sigma=0.012, seed=seed))
             assert r.report.total_return < 0.0
+
+
+class TestReviewFixes:
+    """Boundary and exactness gaps found by mutation testing."""
+
+    def test_percentile_includes_current_bar_and_matches_definition(self):
+        from research import indicators as ind
+
+        sig = VolRegimeTrend(**SMALL).signal(bars_from_closes(CALM), False)
+        vol = ind.realized_vol(CALM, SMALL["vol_period"])
+        assert sig.indicators["vol_pct"] == pytest.approx(np.mean(vol[-SMALL["vol_window"]:] <= vol[-1]))
+        assert sig.indicators["vol_pct"] == pytest.approx(1 / SMALL["vol_window"])  # calmest reading: only itself
+
+    def test_exit_pct_is_strict_and_one_disables_the_vol_exit(self):
+        b = bars_from_closes(STORMY)  # percentile == 1.0
+        assert VolRegimeTrend(**SMALL, entry_pct=1.0, exit_pct=1.0).signal(b, True).kind.value == "HOLD"
+        assert VolRegimeTrend(**SMALL, entry_pct=0.5, exit_pct=0.99).signal(b, True).kind.value == "EXIT"
+
+    def test_close_equal_to_sma_is_neither_entry_nor_exit(self):
+        flat = bars_from_closes([100.0] * 80)
+        s = VolRegimeTrend(**SMALL, **OFF)
+        assert s.signal(flat, False).kind.value == "HOLD"
+        assert s.signal(flat, True).kind.value == "HOLD"
+
+    def test_strength_formula(self):
+        s = VolRegimeTrend(**SMALL, entry_pct=0.7, exit_pct=0.95)
+        checked = 0
+        for end in range(60, 140):
+            sig = s.signal(bars_from_closes(TestRules._wave()[:end]), False)
+            if sig.kind.value == "ENTER":
+                assert sig.strength == pytest.approx(0.5 + 0.5 * (1 - sig.indicators["vol_pct"] / 0.7))
+                checked += 1
+        assert checked >= 8

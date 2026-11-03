@@ -214,3 +214,42 @@ class TestSyntheticEdge:
             fixed += relative_after_entries(PairsZScore(partner=b, exit_z=0.0), a, b)
             rolling += relative_after_entries(PairsZScore(partner=b, exit_z=0.0, rolling_beta=True, beta_window=60), a, b)
         assert np.mean(fixed) > 0.03 and np.mean(rolling) < 0.5 * np.mean(fixed)
+
+
+class TestPartnerRobustness:
+    def test_partner_list_is_copied_at_construction(self):
+        a, b = synth.cointegrated_pair(200, seed=3)
+        bl = list(b)
+        s = PairsZScore(partner=bl)
+        before = decide(s, a, 150).indicators["z"]
+        bl.clear()
+        assert decide(s, a, 150).indicators["z"] == before
+
+    def test_equal_instant_other_timezone_matches(self):
+        from datetime import timedelta, timezone
+        a, b = synth.cointegrated_pair(200, seed=3)
+        tz = timezone(timedelta(hours=-5))
+        b_tz = [replace(c, timestamp=c.timestamp.astimezone(tz)) for c in b]
+        assert decide(PairsZScore(partner=b_tz), a, 150).indicators["z"] == decide(PairsZScore(partner=b), a, 150).indicators["z"]
+
+    def test_unsorted_partner_is_equivalent(self):
+        a, b = synth.cointegrated_pair(200, seed=3)
+        assert decide(PairsZScore(partner=b[::-1]), a, 150).indicators["z"] == decide(PairsZScore(partner=b), a, 150).indicators["z"]
+
+    def test_conflicting_duplicate_partner_timestamps_rejected(self):
+        _, b = synth.cointegrated_pair(50, seed=3)
+        with pytest.raises(ValueError, match="duplicate"):
+            PairsZScore(partner=b + [replace(b[-1], close=b[-1].close * 3)])
+        PairsZScore(partner=b + [b[-1]])  # identical duplicate is harmless
+
+    def test_non_positive_decision_close_holds_not_stale_signal(self):
+        a, b = synth.cointegrated_pair(200, seed=3)
+        bars = Bars.from_candles("A", a)
+        bars.close[-1] = 0.0
+        sig = PairsZScore(partner=b).signal(bars, False)
+        assert sig.kind.value == "HOLD" and "z" not in sig.indicators
+
+    @pytest.mark.parametrize("bad", [dict(fixed_beta=float("nan")), dict(fixed_beta=float("inf"))])
+    def test_non_finite_beta_rejected(self, bad):
+        with pytest.raises(ValueError):
+            PairsZScoreParams(**bad)

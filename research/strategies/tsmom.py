@@ -23,6 +23,9 @@ HOLD     otherwise - the band 0 <= mom <= hurdle is hysteresis: a position
          opened above the hurdle is not closed until momentum turns negative,
          and a flat book does not buy marginally positive momentum.
 
+Exit depends only on ``mom``: a zero-volatility (perfectly flat) tape cannot trap a
+losing position (only ENTER needs ``vol`` > 0, for the strength). ``hurdle`` must be finite.
+
 Signal strength = tanh(mom / (vol * sqrt(lookback))) - the momentum "t-stat":
 the return in units of the return a random walk of this volatility would
 typically produce over the window, squashed into [0, 1]. A strong, smooth
@@ -63,8 +66,8 @@ class TsmomParams(StrategyParams):
             raise ValueError("skip must be >= 0")
         if self.skip >= self.lookback:
             raise ValueError("skip must be < lookback")
-        if self.hurdle < 0:
-            raise ValueError("hurdle must be >= 0")
+        if not 0 <= self.hurdle < float("inf"):  # also rejects NaN
+            raise ValueError("hurdle must be finite and >= 0")
 
 
 class Tsmom(ResearchStrategy):
@@ -95,14 +98,17 @@ class Tsmom(ResearchStrategy):
         mom = close[end] / close[end - p.lookback] - 1.0 if end - p.lookback >= 0 else np.nan
         vol = ind.realized_vol(close, p.vol_window)[-1]
         info = dict(mom=mom, vol=vol, hurdle=p.hurdle)
-        if not ind.last_finite(mom, vol) or vol <= 0:
+        if not ind.last_finite(mom):
             return Signal.hold("indicators not ready", **info)
 
         if in_position:
+            # Exit needs only the momentum: a dead-flat tape (vol == 0) must not trap a losing position.
             if mom < 0:
                 return Signal.exit(1.0, f"{p.lookback}-bar momentum {mom:+.1%} < 0", **info)
             return Signal.hold(f"momentum {mom:+.1%} still non-negative", **info)
 
+        if not ind.last_finite(vol) or vol <= 0:
+            return Signal.hold("indicators not ready", **info)
         if mom > p.hurdle:
             strength = clip01(float(np.tanh(mom / (vol * np.sqrt(p.lookback)))))
             return Signal.enter(strength, f"{p.lookback}-bar momentum {mom:+.1%} > hurdle {p.hurdle:.1%}", **info)

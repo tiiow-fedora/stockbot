@@ -14,6 +14,7 @@ aligned value is NaN, which strategies treat as "no signal" (HOLD).
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Dict, Sequence
 
 import numpy as np
@@ -23,14 +24,20 @@ from core.models import Candle
 MAX_FFILL = 3
 
 
-def partner_close_map(partner: Sequence[Candle]) -> Dict[object, float]:
-    """``{timestamp: close}`` for the partner series; rejects an empty partner."""
+def partner_close_map(partner: Sequence[Candle]) -> Dict[datetime, float]:
+    """``{timestamp: close}`` copied from the partner series (later mutation of the list is
+    ignored); order-independent. Rejects an empty partner and conflicting duplicate timestamps."""
     if partner is None or len(partner) == 0:
         raise ValueError("partner candles must be a non-empty list")
-    return {c.timestamp: float(c.close) for c in partner}
+    out: Dict[datetime, float] = {}
+    for c in partner:
+        k, v = c.timestamp, float(c.close)
+        if out.setdefault(k, v) != v:
+            raise ValueError(f"duplicate partner timestamp with conflicting closes: {c.timestamp}")
+    return out
 
 
-def align_partner(closes: Dict[object, float], timestamps: Sequence, max_ffill: int = MAX_FFILL) -> np.ndarray:
+def align_partner(closes: Dict[datetime, float], timestamps: Sequence, max_ffill: int = MAX_FFILL) -> np.ndarray:
     """Partner close for every timestamp in ``timestamps`` (NaN where unavailable)."""
     out = np.full(len(timestamps), np.nan)
     last, missing = np.nan, 0

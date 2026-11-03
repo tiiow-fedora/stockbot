@@ -83,6 +83,24 @@ class TestBootstrapTrades:
         json.dumps(z, allow_nan=False)
         assert z["extras"]["sharpe"]["mean"] is None
 
+    def test_ruin_is_strict_and_uses_the_path_minimum_not_the_final_value(self):
+        # [-500,+500] reshuffled: the trough is exactly 50% of start -> NOT ruin (strict <)
+        edge = mc.bootstrap_trades([-500.0, 500.0], 100, 1000.0, seed=0, replace=False, ruin_level=0.5)
+        assert edge.prob_ruin == 0.0
+        # [-600,+600]: ends flat in every order, but loss-first orders dip to 400 (< 500)
+        dip = mc.bootstrap_trades([-600.0, 600.0], 400, 1000.0, seed=0, replace=False, ruin_level=0.5)
+        assert 0.35 < dip.prob_ruin < 0.65 and dip.prob_loss == 0.0  # final == start is not a loss
+
+    def test_drawdown_path_starts_at_starting_equity(self):
+        s = mc.bootstrap_trades([-100.0, -100.0], 20, 1000.0, seed=0, replace=False)
+        assert s.extras["max_drawdown"]["min"] == pytest.approx(0.2)  # 1000 -> 800, not 900 -> 800
+
+    def test_describe_percentiles_are_linear_interpolation(self):
+        d = mc.describe([1, 2, 3, 4, 5, float("nan")])
+        assert d["n_valid"] == 5 and d["percentiles"]["p50"] == 3.0
+        assert d["percentiles"]["p25"] == 2.0 and d["percentiles"]["p5"] == pytest.approx(1.2)
+        assert d["std"] == pytest.approx(np.std([1, 2, 3, 4, 5], ddof=1))
+
     @pytest.mark.parametrize("bad, match", [
         ([], "at least 2"), ([1.0], "at least 2"), ([1.0, float("nan")], "NaN"),
     ])
@@ -154,6 +172,28 @@ class TestBlockBootstrap:
         assert s.extras["sharpe"]["n_valid"] == 0  # undefined, not 0/inf
         assert s.extras["max_drawdown"]["max"] == 0.0 and s.prob_loss == 0.0
 
+    def test_block_path_starts_at_one_and_ruin_uses_path_minimum(self):
+        s = mc.block_bootstrap_returns([-0.1] * 10, 5, 2, seed=0)  # every path is the same 10 losses
+        assert s.extras["max_drawdown"]["min"] == pytest.approx(1 - 0.9 ** 10)  # peak is the start (1.0)
+        assert s.prob_ruin == 1.0  # 0.9^10 = 0.349 < 0.5
+        dip = mc.block_bootstrap_returns([-0.6, 2.5] * 5, 5, 10, seed=0, stationary=False, circular=False)
+        assert dip.minimum > 1.0 and dip.prob_ruin == 1.0  # ends up 5x, but the first bar dipped to 0.4 < 0.5
+
+    def test_sharpe_matrix_equals_metrics_sharpe_ratio(self):
+        rng = np.random.default_rng(11)
+        rows = rng.normal(0.0007, 0.012, (6, 120))
+        rows[3] = 0.001  # zero variance -> NaN in both
+        for ppy in (252, 12):
+            got = mc._sharpe_matrix(rows, ppy)
+            want = np.array([metrics.sharpe_ratio(r, periods_per_year=ppy) for r in rows])
+            np.testing.assert_allclose(got, want, equal_nan=True)
+        assert math.isnan(got[3])
+
+    def test_summary_sharpe_matches_observed_for_single_full_path(self):
+        r = ar1(60, 0.0, 8)
+        s = mc.block_bootstrap_returns(r, 5, 60, seed=0, stationary=False, circular=False)
+        assert s.extras["sharpe"]["min"] == pytest.approx(metrics.sharpe_ratio(r)) == pytest.approx(s.meta["observed_sharpe"])
+
     @pytest.mark.parametrize("kwargs, match", [
         (dict(returns=[]), "at least 2"),
         (dict(returns=[0.01]), "at least 2"),
@@ -219,6 +259,17 @@ class TestPermutationTest:
     def test_shuffle_mode_runs_and_flags_clairvoyance(self, market):
         res = mc.permutation_test(None, (market > 0).astype(float), market, 200, seed=0, mode="shuffle")
         assert res.mode == "shuffle" and res.p_value < 0.02
+
+    def test_min_shift_is_enforced(self, market):
+        """With min_shift == n/2 only one shift is possible, so the null is constant; a null
+        that includes shift 0 would contain the observed value and have spread."""
+        m = market[:200]
+        res = mc.permutation_test(None, (m > 0).astype(float), m, 100, seed=0, min_shift=100)
+        assert res.null_std == pytest.approx(0.0, abs=1e-12) and res.observed > res.null_mean
+
+    def test_one_sided_direction_a_loser_gets_p_near_one(self, market):
+        res = mc.permutation_test(None, (market < 0).astype(float), market, 300, seed=1)  # anti-clairvoyant
+        assert res.p_value > 0.99
 
     def test_flat_position_gives_nan_sharpe_p(self, market):
         res = mc.permutation_test(None, np.zeros(len(market)), market, 50, seed=0, statistic="sharpe")

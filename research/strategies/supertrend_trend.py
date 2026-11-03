@@ -50,8 +50,8 @@ class SuperTrendParams(StrategyParams):
     def validate(self) -> None:
         if self.period < 2:
             raise ValueError("period must be >= 2")
-        if self.mult <= 0:
-            raise ValueError("mult must be > 0")
+        if not 0 < self.mult < float("inf"):  # also rejects NaN
+            raise ValueError("mult must be finite and > 0")
         if self.max_age < 1:
             raise ValueError("max_age must be >= 1")
 

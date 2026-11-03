@@ -94,6 +94,7 @@ def drawdown_series(equity: Sequence[float]) -> np.ndarray:
     peak = np.maximum.accumulate(eq)
     with np.errstate(divide="ignore", invalid="ignore"):
         dd = np.where(peak > 0, (peak - eq) / peak, 0.0)
+    dd[np.isnan(peak)] = NAN  # a NaN in the curve makes the drawdown undefined, not 0
     return dd
 
 

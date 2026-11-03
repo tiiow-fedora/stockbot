@@ -65,6 +65,15 @@ class TestEntryRules:
         sig = s.signal(with_last(100.0, 103.2, 100.5, 103.0), False)  # thrust 1.5 vs ATR_prev = 2.0
         assert sig.kind.value == "ENTER" and sig.indicators["atr"] > 2.0
 
+    def test_no_entry_that_the_chandelier_would_exit_on_the_next_bar(self):
+        """A thrust bar still more than ``chand_mult`` ATR under the recent high would be sold on
+        the very next bar by the stateless Chandelier, so it must not be bought."""
+        bars = ohlc(QUIET[:20] + [(100.0, 110.0, 99.0, 100.0)] + QUIET[:15] + [(100.0, 103.2, 100.5, 103.0)])
+        s = AtrExpansionBreakout()
+        assert kind(s, bars, in_position=True) == "EXIT"
+        assert kind(s, bars) == "HOLD"
+        assert kind(AtrExpansionBreakout(chand_mult=4.0), bars) == "ENTER"  # level 110 - 4 ATR < 103
+
     def test_strength_grows_with_thrust(self):
         s = AtrExpansionBreakout()
         small = s.signal(with_last(100.0, 102.7, 100.0, 102.2), False)
@@ -167,3 +176,22 @@ class TestSyntheticEdge:
         for c in (synth.mean_reverting(500, half_life=8.0, sigma=0.012, seed=3), synth.jump_diffusion(500, seed=7)):
             r = run_backtest(AtrExpansionBreakout(), c)
             assert r.report.win_rate < 0.5
+
+
+class TestExactBoundaries:
+    """QUIET has ATR exactly 2.0, so these thresholds are hit with exact binary arithmetic."""
+
+    def test_thrust_must_strictly_exceed_k(self):
+        bar = with_last(100.0, 103.0, 100.0, 103.0)  # thrust exactly 1.5 ATR, TR 3.0
+        assert kind(AtrExpansionBreakout(k=1.5, expansion=1.0), bar) == "HOLD"
+        assert kind(AtrExpansionBreakout(k=1.49, expansion=1.0), bar) == "ENTER"
+
+    def test_range_must_strictly_exceed_expansion(self):
+        bar = with_last(100.0, 103.0, 100.0, 103.0)  # TR / ATR_prev == 1.5 exactly
+        assert kind(AtrExpansionBreakout(expansion=1.5), bar) == "HOLD"
+        assert kind(AtrExpansionBreakout(expansion=1.49), bar) == "ENTER"
+
+    def test_close_position_boundary_is_inclusive(self):
+        bar = with_last(100.0, 104.0, 100.0, 103.0)  # close sits at exactly 75% of the range
+        assert kind(AtrExpansionBreakout(close_pos=0.25), bar) == "ENTER"
+        assert kind(AtrExpansionBreakout(close_pos=0.24), bar) == "HOLD"

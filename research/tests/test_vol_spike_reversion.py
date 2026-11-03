@@ -166,3 +166,19 @@ class TestSyntheticEdge:
         c = synth.candles_from_closes(100 * np.exp(np.cumsum(r)), "CRASH", 5)
         res = run_backtest(VolSpikeReversion(), c)
         assert res.report.num_trades >= 1 and res.report.total_return < 0.0
+
+
+class TestRobustness:
+    @pytest.mark.parametrize("bad", [dict(spike_ratio=float("inf")), dict(spike_ratio=float("nan")), dict(drop_pct=float("nan"))])
+    def test_non_finite_params_rejected(self, bad):
+        with pytest.raises(ValueError):
+            VolSpikeParams(**bad)
+
+    def test_no_entry_when_exit_would_fire_on_the_same_bar(self):
+        """Spike up then pull-back: close is >= 6% under the 20-bar high but still above the 20-bar SMA,
+        so the recovery exit is already true; entering would just buy and sell the next bar."""
+        c = [80.0 + 0.1 * (-1) ** i for i in range(40)] + [100.0, 93.0]
+        s = VolSpikeReversion()
+        bars = bars_from_closes(c)
+        assert s.signal(bars, True).kind.value == "EXIT"
+        assert s.signal(bars, False).kind.value == "HOLD"

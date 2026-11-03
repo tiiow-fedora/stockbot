@@ -151,3 +151,19 @@ class TestSyntheticEdge:
         for seed in (1, 2, 3):
             c = synth.ar1_momentum(500, phi=0.5, sigma=0.01, mu=0.0003, seed=seed)
             assert run_backtest(IbsReversion(), c).report.total_return < -0.05, seed
+
+
+class TestStrengthValues:
+    def test_strength_formula(self):
+        s = sig(97.0, 96.95, 99.0)
+        assert s.kind.value == "ENTER"
+        low = 0.25 * (1 - s.indicators["ibs"] / 0.2)
+        stretch = 0.25 * min(1.0, -s.indicators["z"] - 1.0)
+        assert s.strength == pytest.approx(0.5 + low + stretch)
+
+    def test_deeper_stretch_is_stronger_at_equal_ibs(self):
+        mild = sig(99.1, 99.05, 100.0)  # z about -1.5
+        deep = sig(98.8, 98.75, 99.7)   # z about -2
+        assert mild.kind.value == deep.kind.value == "ENTER"
+        assert mild.indicators["ibs"] == pytest.approx(deep.indicators["ibs"], abs=0.01)
+        assert mild.strength < deep.strength

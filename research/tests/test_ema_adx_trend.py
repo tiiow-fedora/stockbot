@@ -150,3 +150,22 @@ class TestSyntheticEdge:
         rets = [run_backtest(EmaAdxTrend(), synth.mean_reverting(500, 8.0, 0.012, seed=s)).report.total_return
                 for s in (3, 13, 23)]
         assert np.mean(rets) < 0.05
+
+
+class TestReviewFixes:
+    def test_entry_requires_adx_strictly_above_threshold(self):
+        adx_v = EmaAdxTrend().signal(bars_from_closes(NOISY_UP), False).indicators["adx"]
+        assert kind(EmaAdxTrend(adx_enter=adx_v, adx_exit=10.0), NOISY_UP, False) == "HOLD"
+
+    def test_exit_requires_adx_strictly_below_threshold(self):
+        adx_v = EmaAdxTrend().signal(bars_from_closes(STALL), True).indicators["adx"]
+        assert kind(EmaAdxTrend(adx_enter=60.0, adx_exit=adx_v), STALL, True) == "HOLD"
+
+    def test_equal_emas_do_not_exit(self):
+        """fast == slow (flat tape) is not a cross-down; with the ADX exit disabled the trade is held."""
+        assert kind(EmaAdxTrend(adx_exit=0.0), [100.0] * 120, True) == "HOLD"
+
+    def test_strength_is_adx_over_fifty(self):
+        sig = EmaAdxTrend(adx_enter=15.0, adx_exit=10.0).signal(bars_from_closes(NOISY_UP), False)
+        assert 0 < sig.indicators["adx"] < 50
+        assert sig.strength == pytest.approx(sig.indicators["adx"] / 50.0)

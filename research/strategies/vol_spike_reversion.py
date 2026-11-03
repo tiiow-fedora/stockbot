@@ -16,7 +16,8 @@ ratio = realised vol over ``short_vol`` bars / realised vol over ``long_vol`` ba
         where realised vol is the root-mean-square of daily log returns (zero-mean, so a
         one-way crash counts as high vol; a plain std would discount its drift).
 ENTER  ratio >= spike_ratio AND close <= (1 - drop_pct) * highest close of the last
-       ``high_window`` bars
+       ``high_window`` bars AND close < SMA(``recover_sma``) (else the recovery exit is
+       already true and the trade would be bought and sold on consecutive bars)
        [and, if ``trend_filter``, close > SMA(``trend_period``): only buy panics inside a
         long-term uptrend]
 EXIT   ratio < normal_ratio (volatility normalised)
@@ -29,7 +30,11 @@ Wins in V-shaped or choppy markets with sharp, short-lived selloffs (fear spikes
 and in mean-reverting series. It is a catch-the-falling-knife strategy: in a persistent
 downtrend or a regime-change crash the volatility stays high and price keeps falling, so
 it buys early and takes large losses (the trend filter reduces but does not remove this).
-Trades are rare; in calm or smoothly trending data it does nothing.
+Trades are rare; in calm or smoothly trending data it does nothing. Measured over 12 seeds of
+500 bars, the defaults make ~1.8 (synth.regime_switching) and ~0.4 (synth.garch) trades per run
+with a slightly negative mean return: there is no demonstrated edge on those generators. Looser
+settings (spike_ratio 1.3-1.5, drop_pct 0.03-0.05) trade 2-7x more but do not earn more, so the
+defaults deliberately favour few, deep panics over activity.
 """
 
 from __future__ import annotations
@@ -70,7 +75,7 @@ class VolSpikeParams(StrategyParams):
             raise ValueError("short_vol must be < long_vol")
         if not 0.0 < self.drop_pct < 1.0:
             raise ValueError("drop_pct must be in (0, 1)")
-        if not 0.0 < self.normal_ratio < self.spike_ratio:
+        if not 0.0 < self.normal_ratio < self.spike_ratio < float("inf"):
             raise ValueError("require 0 < normal_ratio < spike_ratio")
 
 
@@ -117,7 +122,7 @@ class VolSpikeReversion(ResearchStrategy):
                 return Signal.exit(1.0, f"close {now:.2f} >= {p.recover_sma}-bar SMA {sma:.2f}: recovered", **info)
             return Signal.hold("in trade, still stressed", **info)
 
-        if ratio >= p.spike_ratio and now <= (1.0 - p.drop_pct) * high:
+        if ratio >= p.spike_ratio and now <= (1.0 - p.drop_pct) * high and now < sma:
             if p.trend_filter:
                 trend = ind.rolling_mean(close, p.trend_period)[-1]
                 info["trend_sma"] = trend

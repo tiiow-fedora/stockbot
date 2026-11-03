@@ -128,3 +128,33 @@ class TestSyntheticEdge:
         """A 40-bar sine cycle is shorter than the 60-EMA lag: the ribbon buys late and sells late."""
         r = run_backtest(MARibbon(), synth.cyclical(500, seed=9))
         assert r.report.total_return < 0.0
+
+
+class TestReviewFixes:
+    """Gaps found in review: the mid > slow leg, the exit pair, strength scale, NaN/inf and atr_period validation."""
+
+    # fast > mid and fast > slow with the slow EMA still rising, but mid has not yet recovered above slow
+    MID_BELOW_SLOW = np.concatenate([RAMP, np.linspace(160, 130, 25), np.linspace(130, 154, 12)])
+
+    def test_requires_mid_above_slow(self):
+        sig = MARibbon(min_separation_atr=0.0).signal(bars_from_closes(self.MID_BELOW_SLOW), False)
+        i = sig.indicators
+        assert i["fast"] > i["mid"] and i["fast"] > i["slow"] > i["mid"] and i["slow_slope"] > 0
+        assert sig.kind.value == "HOLD" and "not aligned" in sig.reason
+
+    def test_exit_is_fast_below_mid_not_fast_below_slow(self):
+        b = bars_from_closes(np.concatenate([RAMP, np.linspace(160, 150, 9)]))
+        sig = MARibbon().signal(b, True)
+        assert sig.indicators["slow"] < sig.indicators["fast"] < sig.indicators["mid"]
+        assert sig.kind.value == "EXIT"
+
+    def test_strength_formula(self):
+        sig = MARibbon(min_separation_atr=0.0).signal(bars_from_closes(np.linspace(100, 103, 150)), False)
+        sep = sig.indicators["separation_atr"]
+        assert 0 < sep < 4  # otherwise the clip would hide a wrong scale
+        assert sig.strength == pytest.approx(0.5 + 0.5 * sep / 4.0)
+
+    @pytest.mark.parametrize("kw", [{"min_separation_atr": float("nan")}, {"min_separation_atr": float("inf")}, {"atr_period": 1}])
+    def test_rejects_nan_inf_and_tiny_atr_period(self, kw):
+        with pytest.raises(ValueError):
+            MARibbonParams(**kw)

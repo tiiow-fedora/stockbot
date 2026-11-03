@@ -176,3 +176,25 @@ class TestSyntheticEdge:
             a, b = synth.cointegrated_pair(500, half_life=10.0, seed=seed)
             total.append(run_backtest(RelativeStrength(partner=b, rs_period=20, margin=0.0, hysteresis=0.0), a).report.total_return)
         assert np.mean(total) < 0.05
+
+
+class TestRobustness:
+    def test_partner_list_is_copied_at_construction(self):
+        a, b = synth.cointegrated_pair(200, seed=3)
+        bl = list(b)
+        s = RelativeStrength(partner=bl)
+        before = decide(s, a, 150).indicators["rs"]
+        bl.clear()
+        assert decide(s, a, 150).indicators["rs"] == before
+
+    def test_zero_price_at_lookback_bar_holds(self):
+        a, b = synth.cointegrated_pair(200, seed=3)
+        bars = Bars.from_candles("A", a)
+        bars.close[-61] = 0.0
+        sig = RelativeStrength(partner=b).signal(bars, False)
+        assert sig.kind.value == "HOLD"
+
+    @pytest.mark.parametrize("bad", [dict(margin=float("nan")), dict(hysteresis=float("nan")), dict(margin=float("inf")), dict(hysteresis=float("inf"))])
+    def test_non_finite_thresholds_rejected(self, bad):
+        with pytest.raises(ValueError):
+            RelativeStrengthParams(**bad)

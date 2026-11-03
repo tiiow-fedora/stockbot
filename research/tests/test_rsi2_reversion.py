@@ -143,3 +143,12 @@ class TestSyntheticEdge:
         """Honest negative: a 2-bar oscillator cannot see an 80-bar swing; each leg is a trend."""
         c = synth.cyclical(500, period=80, amplitude=0.1, seed=1)
         assert run_backtest(Rsi2Reversion(trend_period=0), c).report.total_return < -0.2
+
+
+class TestStrengthValues:
+    def test_strength_formula_and_cap(self):
+        s = sig(UP + [117.0, 113.0])
+        assert s.kind.value == "ENTER"
+        assert s.strength == pytest.approx(0.5 + 0.5 * (10.0 - s.indicators["rsi"]) / 10.0)
+        washed_out = sig(UP + [115.0, 110.0, 105.0, 100.0], trend_period=0)
+        assert washed_out.indicators["rsi"] < 1.0 and washed_out.strength > 0.95

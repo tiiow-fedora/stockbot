@@ -77,7 +77,7 @@ class PairsZScoreParams(StrategyParams):
             raise ValueError("beta_window and corr_window must be >= 5")
         if not 0.0 <= self.exit_z < self.entry_z < self.stop_z:
             raise ValueError("require 0 <= exit_z < entry_z < stop_z")
-        if self.fixed_beta <= 0:
+        if not np.isfinite(self.fixed_beta) or self.fixed_beta <= 0:
             raise ValueError("fixed_beta must be > 0")
         if not -1.0 <= self.min_corr <= 1.0:
             raise ValueError("min_corr must be in [-1, 1]")
@@ -117,6 +117,8 @@ class PairsZScore(ResearchStrategy):
         if not np.isfinite(partner[-1]):
             return Signal.hold("partner has no bar at the decision timestamp")
         mask = _partner.usable_mask(bars.close, partner)
+        if not mask[-1]:
+            return Signal.hold("decision bar has no usable own/partner price")
         la, lb = np.log(bars.close[mask]), np.log(partner[mask])
 
         if p.rolling_beta:
