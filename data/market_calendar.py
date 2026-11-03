@@ -146,3 +146,29 @@ def build_market_calendar(name: str) -> MarketCalendar:
     if name == "alpaca":
         return AlpacaMarketCalendar()
     raise ValueError(f"unknown market calendar: {name!r}")
+
+
+def session_fraction_elapsed(now: datetime) -> float:
+    """Fraction (0..1] of the regular 9:30-16:00 ET session elapsed at
+    `now`; 1.0 when the session is over, not yet open, or a weekend (the
+    latest daily bar is then a complete day). Linear in time - real
+    intraday volume is U-shaped, so this is an approximation."""
+    from zoneinfo import ZoneInfo
+
+    local = now.astimezone(ZoneInfo("America/New_York"))
+    if local.weekday() >= 5:
+        return 1.0
+    open_min = 9 * 60 + 30
+    close_min = 16 * 60
+    minute = local.hour * 60 + local.minute + local.second / 60.0
+    if minute < open_min or minute >= close_min:
+        return 1.0
+    return (minute - open_min) / (close_min - open_min)
+
+
+def project_full_day_volume(partial_volume: float, now: datetime, min_fraction: float = 0.1) -> int:
+    """Scale a partial-day share volume up to an expected full-day figure so
+    it is comparable with completed daily bars. `min_fraction` caps the
+    blow-up in the first minutes after the open."""
+    fraction = max(min_fraction, session_fraction_elapsed(now))
+    return int(partial_volume / fraction)

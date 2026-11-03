@@ -47,3 +47,17 @@ class MarketDataService:
         if self._db and candles:
             self._db.save_candles(candles)
         return candles
+
+
+def completed_bars(candles: List[Candle], as_of: datetime, timeframe: str = "1Day") -> List[Candle]:
+    """Candles that are fully formed as of `as_of`.
+
+    For daily bars, today's still-forming bar is timestamped at today's
+    session start, i.e. *before* `as_of`, so a plain `timestamp < as_of`
+    filter lets it through - duplicating the snapshot (which already
+    represents today) and putting a partial-day volume into the history
+    that full-day volumes get averaged against. Compare calendar dates
+    for daily bars instead."""
+    if timeframe == "1Day":
+        return [c for c in candles if c.timestamp.date() < as_of.date()]
+    return [c for c in candles if c.timestamp < as_of]
