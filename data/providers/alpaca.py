@@ -177,14 +177,20 @@ class AlpacaNewsProvider(NewsDataProvider):
 
         items: List[NewsItem] = []
         for article in response.data.get("news", []):
-            items.append(
-                NewsItem(
-                    symbol=symbol,
-                    timestamp=article.created_at,
-                    headline=article.headline,
-                    source=article.source or "alpaca",
-                    sentiment=None,  # Alpaca does not score sentiment; left for an optional module.
-                    url=getattr(article, "url", None),
+            try:
+                items.append(
+                    NewsItem(
+                        symbol=symbol,
+                        timestamp=article.created_at,
+                        headline=article.headline,
+                        source=article.source or "alpaca",
+                        sentiment=None,  # Alpaca does not score sentiment; left for an optional module.
+                        url=getattr(article, "url", None),
+                    )
                 )
-            )
+            except (ValueError, TypeError, AttributeError) as exc:
+                # One malformed article (e.g. a naive timestamp) must not
+                # discard the batch - or, worse, make _run_cycle skip the
+                # whole symbol for as long as it stays in the news window.
+                logger.warning("Skipping malformed news article for %s: %s", symbol, exc)
         return items
