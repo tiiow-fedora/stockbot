@@ -234,7 +234,7 @@ def bootstrap_trades(
     equity = np.concatenate([np.full((n_sims, 1), starting_equity), starting_equity + np.cumsum(draws, axis=1)], axis=1)
     final = equity[:, -1]
     mdd = _max_dd_matrix(equity)
-    ruined = equity[:,-1] < ruin_level * starting_equity
+    ruined = equity.min(axis=1) < ruin_level * starting_equity
     return _summary(
         "bootstrap_trades", "final_equity", final, float(np.mean(final < starting_equity)),
         percentiles=percentiles, prob_ruin=float(np.mean(ruined)),
@@ -531,7 +531,7 @@ def price_path_robustness(
         f"price_paths[{method}]", "total_return", ret, float(np.mean(ret[np.isfinite(ret)] < 0)) if ok.any() else float("nan"),
         percentiles=percentiles,
         probabilities={"profitable": float(np.mean(ret[ok] > 0)) if ok.any() else float("nan"),
-                       "beats_buy_hold": float(np.mean(ret[ok] > bench[ok])) if ok.any() else float("nan"),
+                       "beats_buy_hold": float(np.mean(ret[ok] >= bench[ok])) if ok.any() else float("nan"),
                        "no_closed_trades": float(np.mean(cols["num_trades"] == 0))},
         extras={k: describe(v, percentiles) for k, v in cols.items() if k != "total_return"},
         meta={"method": method, "block_len": block_len, "seed": seed, "n_bars": len(candles), "real": one(candles)},
