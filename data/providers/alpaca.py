@@ -126,11 +126,23 @@ class AlpacaMarketDataProvider(MarketDataProvider):
             raise MarketDataError(f"no recent daily bar available for {symbol}")
 
         latest = candles[-1]
+        volume = latest.volume
+        from zoneinfo import ZoneInfo
+
+        et = ZoneInfo("America/New_York")
+        if latest.timestamp.astimezone(et).date() == now.astimezone(et).date():
+            # Today's bar is still forming: its volume is "so far today",
+            # but the history it is compared against is FULL days. Project
+            # it to a full-day figure so intraday cycles don't all read as
+            # a volume collapse.
+            from data.market_calendar import project_full_day_volume
+
+            volume = project_full_day_volume(latest.volume, now)
         return MarketSnapshot(
             symbol=symbol,
             timestamp=now,
             price=latest.close,
-            volume=latest.volume,
+            volume=volume,
             open=latest.open,
             high=latest.high,
             low=latest.low,

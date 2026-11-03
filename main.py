@@ -32,7 +32,7 @@ from core.config import AppConfig, load_config
 from core.logging import get_logger
 from core.models import Action
 from data.base import MarketDataProvider
-from data.market_data import MarketDataService
+from data.market_data import MarketDataService, completed_bars
 from data.news_data import build_news_provider
 from database.database import DatabaseManager
 from execution.base import OrderExecutor
@@ -70,6 +70,12 @@ def build_market_data_provider(config: AppConfig) -> MarketDataProvider:
         from data.providers.alpaca import AlpacaMarketDataProvider
 
         return AlpacaMarketDataProvider()
+    if provider == "class_simulator":
+        from data.providers.class_simulator import ClassSimulatorMarketDataProvider
+
+        return ClassSimulatorMarketDataProvider(
+            quotes_path=config.data.class_simulator_quotes_path, history_dir=config.data.csv_dir
+        )
     raise ValueError(f"unknown data provider: {provider!r}")
 
 
@@ -87,6 +93,10 @@ def build_executor(config: AppConfig) -> OrderExecutor:
         return paper
     if config.execution.mode == "manual":
         return ManualExecutor()
+    if config.execution.mode == "class_simulator":
+        from execution.class_simulator import ClassSimulatorExecutor
+
+        return ClassSimulatorExecutor(config.execution.class_simulator_outbox)
     raise ValueError(f"unknown execution mode: {config.execution.mode!r}")
 
 
@@ -286,7 +296,7 @@ def _run_cycle(
     for symbol, snapshot in snapshots.items():
         try:
             history = market_data.get_history(symbol, config.data.history_lookback_days, config.data.timeframe)
-            history = [c for c in history if c.timestamp < snapshot.timestamp]
+            history = completed_bars(history, snapshot.timestamp, config.data.timeframe)
 
             news_start = snapshot.timestamp - timedelta(days=1)
             news = news_provider.get_news(symbol, news_start, snapshot.timestamp)

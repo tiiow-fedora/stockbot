@@ -45,6 +45,9 @@ class MeanReversionStrategy(Strategy):
         volumes = [c.volume for c in history] + [snapshot.volume]
 
         ind = self._compute_indicators(closes, volumes)
+        if snapshot.volume <= 0:
+            # Volume 0 = "no volume reported", not a -100% collapse.
+            ind["volume_change"] = None
 
         if len(closes) < cfg.min_history_bars or ind["sma_long"] is None:
             return self._hold_decision(

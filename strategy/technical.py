@@ -41,6 +41,10 @@ class TechnicalStrategy(Strategy):
         volumes = [c.volume for c in history] + [snapshot.volume]
 
         indicator_values = self._compute_indicators(closes, volumes)
+        if snapshot.volume <= 0:
+            # Volume 0 means "this source gave no volume", not "volume
+            # collapsed to nothing" - don't let it read as a -100% change.
+            indicator_values["volume_change"] = None
 
         if len(closes) < cfg.min_history_bars or indicator_values["sma_long"] is None:
             return self._hold_decision(
