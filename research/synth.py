@@ -269,9 +269,9 @@ def cointegrated_pair(
     spread_sigma: float = 0.015, seed: int = 0, price_a: float = 100.0, price_b: float = 80.0,
     symbols: Tuple[str, str] = ("PAIR_A", "PAIR_B"),
 ) -> Tuple[List[Candle], List[Candle]]:
-    """Two series sharing one random-walk trend: log A = trend + s, log B = beta*trend (+ const),
-    where s is mean-reverting (OU, half-life ``half_life``) - so A/B^beta is stationary even
-    though both wander. The classic pairs-trading setup."""
+    """Two series sharing one random-walk trend: log A = beta*trend + s, log B = trend (+ consts),
+    where s is mean-reverting (OU, half-life ``half_life``) - so log A - beta*log B = s is
+    stationary even though both legs wander. The classic pairs-trading setup (hedge ratio ``beta``)."""
     if half_life <= 0:
         raise ValueError("half_life must be positive")
     rng = _rng(seed)
@@ -282,8 +282,8 @@ def cointegrated_pair(
     eps = rng.normal(0.0, spread_sigma, n)
     for t in range(1, n):
         s[t] = rho * s[t - 1] + eps[t]
-    a = price_a * np.exp(trend + s)
-    b = price_b * np.exp(beta * trend)
+    a = price_a * np.exp(beta * trend + s)
+    b = price_b * np.exp(trend)
     return (
         candles_from_closes(a, symbols[0], seed),
         candles_from_closes(b, symbols[1], seed + 1),
