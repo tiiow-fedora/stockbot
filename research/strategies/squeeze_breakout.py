@@ -116,7 +116,7 @@ class SqueezeBreakout(ResearchStrategy):
 
         with np.errstate(invalid="ignore"):
             squeeze_on = (bb_up < kc_up) & (bb_lo > kc_lo)  # NaN comparisons are False -> warm-up is "off"
-        was_squeezed = bool(squeeze_on[-1 - p.squeeze_lookback : -1].any())
+        was_squeezed = bool(squeeze_on[-p.squeeze_lookback : -1].any())
         info["squeeze_now"] = float(squeeze_on[-1])
         if squeeze_on[-1] or not was_squeezed:
             return Signal.hold("no fresh squeeze release", **info)

@@ -24,8 +24,9 @@ strategy (stateless); the engine's risk overlay is the only loss limit.
 
 Expected behaviour
 ------------------
-Wins on mean-reverting and cyclical series: trades are very short (1-3 bars)
-and frequent. It has no trend filter, so in a persistent downtrend it keeps
+Wins on mean-reverting series and on fast cycles: trades are very short (1-3
+bars) and frequent. On slow cycles (synth.cyclical default, period 40) it
+LOSES (about -53% on scenario_suite cyclical). It has no trend filter, so in a persistent downtrend it keeps
 buying weak closes that keep getting weaker and loses; it also loses on momentum
 series where a weak close predicts another. Small average gain per trade, so it
 is sensitive to costs (5 bps slippage per fill in the lab).

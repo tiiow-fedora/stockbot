@@ -24,14 +24,21 @@ ENTER  close < lower
 EXIT   ``exit_at`` = 'mid':   close >= mid
        ``exit_at`` = 'upper': close >= mid + num_std * sd
 There is no price stop inside the strategy (it is stateless); only the engine's
-risk overlay limits a loss, so a position that never recovers is held.
+risk overlay limits a loss, so a position that never recovers is held. In a
+persistent downtrend with the lab's loose 50% stop it lost about 63%; with the
+shipped 8% stop about 11%. ``trend_period`` is the intended guard (it removed
+the loss entirely there), so no separate drawdown guard is provided.
 Signal strength is 0.5 at the lower band and grows to 1.0 when the close is one
 further standard deviation below it (deeper dip = stronger conviction), which
 is why ``panic_std`` should sit above ``num_std`` + 1 to leave that range usable.
 
 Expected behaviour
 ------------------
-Wins on mean-reverting and cyclical series (many small, high win-rate trades).
+Wins on mean-reverting series (many small, high win-rate trades) and on
+FAST cycles (period about 1-2x the band window, with a band narrow enough to be
+crossed: a pure sine never reaches -2 sd, so num_std 2.0 does not trade it). On
+slow cycles (synth.cyclical default, period 40) it LOSES: each leg is a trend
+over the 20-bar window (about -31% on scenario_suite cyclical).
 It LOSES in persistent downtrends and sharp regime breaks: each new low looks
 like a "dip", so it buys repeatedly into a falling market and holds losers
 until (if ever) price returns to the mean. The trend filter removes most of

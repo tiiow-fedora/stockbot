@@ -31,6 +31,7 @@ from research.walkforward import (
 )
 
 GRID = {"entry_period": [10, 20, 40], "exit_period": [5, 10]}
+SMALL_LAG = {"lag": [5, 12, 30], "exit_lag": [3, 8]}
 CFG = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60)
 
 
@@ -184,12 +185,12 @@ def corrupt_from(candles: List[Candle], idx: int, seed: int = 99) -> List[Candle
 
 
 class TestNoLeakage:
-    @pytest.mark.parametrize("anchored,cls,grid", [(False, DonchianBreakout, GRID), (True, LagMomentum, None)])
+    @pytest.mark.parametrize("anchored,cls,grid", [(False, DonchianBreakout, GRID), (True, LagMomentum, SMALL_LAG)])
     def test_test_slice_never_influences_selection(self, anchored, cls, grid):
-        candles = synth.regime_switching(420, seed=5)
-        cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, anchored=anchored)
+        candles = synth.regime_switching(360, seed=5)
+        cfg = WalkForwardConfig(train_bars=120, test_bars=50, warmup_bars=60, anchored=anchored)
         base = opt(cfg, grid, cls).run(candles)
-        assert len(base.windows) >= 4
+        assert len(base.windows) >= 4  # 360 bars, train 120, test 50 -> 5 windows
         for k in (1, len(base.windows) - 1):
             w = base.windows[k].window
             res = opt(cfg, grid, cls).run(corrupt_from(candles, w.test_start))
@@ -214,7 +215,8 @@ class TestNoLeakage:
 @pytest.fixture(scope="module")
 def random_walk_runs() -> List[WalkForwardResult]:
     cfg = WalkForwardConfig(train_bars=120, test_bars=60, warmup_bars=60)
-    return [opt(cfg, grid=None, cls=LagMomentum).run(synth.gbm(360, 0.0, 0.012, seed)) for seed in range(8)]
+    return [opt(cfg, grid={"lag": [3, 8, 16, 30, 60], "exit_lag": [2, 4, 10]}, cls=LagMomentum).run(synth.gbm(360, 0.0, 0.012, seed))
+            for seed in range(8)]
 
 
 class TestOverfittingVisible:
@@ -257,13 +259,20 @@ class TestSelection:
         assert [w.params for w in a.windows] == [w.params for w in b.windows]
         assert np.array_equal(a.equity, b.equity)
 
+    def test_ties_resolve_to_first_in_grid_order(self):
+        """A constant objective ties every candidate: the earliest grid cell must win every window."""
+        cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=lambda r: 1.0)
+        o = opt(cfg)
+        res = o.run(synth.gbm(350, seed=4))
+        assert res.n_skipped == 0 and all(w.params == o.combos[0] for w in res.windows)
+
     def test_custom_objective_callable_and_name(self):
         c = synth.trending(350, 0.004, 0.006, seed=1)
         cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=lambda r: -r.max_drawdown)
         r = opt(cfg).run(c)
         assert all(w.is_score <= 0 for w in r.active)
         for name in ("sortino", "calmar", "total_return"):
-            opt(WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=name), None, LagMomentum).run(c)
+            opt(WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=name), SMALL_LAG, LagMomentum).run(c)
 
     def test_nan_objective_is_minus_inf_and_skips_window(self):
         rep = metrics.PerformanceReport()
@@ -402,6 +411,19 @@ class TestResult:
         assert not good.overfit_flag and good.stability["modal_fraction"] == 1.0
         few = WalkForwardResult(WalkForwardConfig(), "x", ws[:2], np.array([1.0]), rep, {})
         assert not few.overfit_flag                                      # < 3 windows: not enough evidence
+
+    def test_overfit_flag_thresholds(self):
+        rep = metrics.compute_report([1.0, 1.0])
+
+        def flag(pairs):
+            ws = [WindowResult(i, Window(0, 1, 1, 2), {"p": 1}, a, b, None, None, 1, 1, False,
+                               np.array([1.0]), np.array([0.0]), []) for i, (a, b) in enumerate(pairs)]
+            return WalkForwardResult(WalkForwardConfig(), "x", ws, np.array([1.0]), rep).overfit_flag
+        assert flag([(1.0, 0.49)] * 3)                       # efficiency 0.49 < 0.5
+        assert not flag([(1.0, 0.5)] * 3)                    # exactly 0.5 survives
+        assert not flag([(-1.0, -2.0)] * 3)                  # IS not positive: nothing to overfit
+        # efficiency is NaN (paired IS mean <= 0) but the OOS mean is negative while the IS mean is positive
+        assert flag([(-1.0, -0.5), (-1.0, -0.5), (5.0, float("nan"))])
 
     def test_to_dict_is_strict_json(self, res):
         d = res.to_dict()

@@ -24,8 +24,10 @@ overlay is the only loss limit.
 
 Expected behaviour
 ------------------
-Wins on mean-reverting and cyclical series and on choppy uptrends: frequent
-trades, high win rate, small average gains. It LOSES when the dip is the start
+Wins on mean-reverting series and choppy uptrends: frequent trades, high win
+rate, small average gains. It is NOT a cyclical-series strategy by default: on
+slow sine cycles (synth.cyclical period 40) the dips keep dipping and it lost
+about 64% on scenario_suite cyclical. It LOSES when the dip is the start
 of a persistent decline (the trend filter delays but does not prevent this) and
 when returns are autocorrelated (momentum): a down day then predicts another.
 In a steady downtrend the filter keeps it mostly flat, which is the point.

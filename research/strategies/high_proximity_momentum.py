@@ -14,8 +14,8 @@ below their high continue to lag. The signal is therefore the ratio
 Rules (long-only, daily bars; H = highest high of the last ``window`` bars, current included)
 ---------------------------------------------------------------------------------------------
 ENTER  close >= (1 - ``proximity``) * H
-       AND H was set within the last ``recent`` bars (the high is fresh, not a
-       stale level the stock has been sitting under)
+       AND H was set at most ``recent`` bars before the decision bar (the high is
+       fresh, not a stale level the stock has been sitting under)
        AND close / close[``mom_period`` bars ago] - 1 > 0
 EXIT   close < (1 - ``exit_proximity``) * H   (proximity has decayed)
 Signal strength is the closeness to the high: 1.0 at the high, 0.5 at the
@@ -29,7 +29,7 @@ pullbacks. In sideways markets the stock oscillates around its high and the
 strategy will buy near the top of the range and sell 10% lower: slow bleed.
 It enters late (only near highs) and exits late (only after a large drawdown
 from the high), so it gives back a sizeable chunk at trend ends, and it
-needs ``window`` + ``mom_period`` bars of history before the first trade. It
+needs max(``window``, ``mom_period`` + 1) + 1 bars of history before the first trade. It
 does not trade downtrends: the close is never near a high.
 """
 
