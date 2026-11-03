@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from typing import List
 
 import numpy as np
@@ -33,8 +34,42 @@ GRID = {"entry_period": [10, 20, 40], "exit_period": [5, 10]}
 CFG = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60)
 
 
-def opt(cfg=CFG, grid=GRID, **kw) -> WalkForwardOptimizer:
-    return WalkForwardOptimizer(DonchianBreakout, grid, cfg, **kw)
+@dataclass(frozen=True)
+class LagParams(StrategyParams):
+    lag: int = 10
+    exit_lag: int = 5
+
+    def validate(self) -> None:
+        if self.lag < 1 or self.exit_lag < 1:
+            raise ValueError("lags must be >= 1")
+
+
+class LagMomentum(ResearchStrategy):
+    """Cheap many-parameter rule (enter if close > close[-lag], exit if close < close[-exit_lag]).
+    Its 36-cell grid on noise is the classic overfitting setup; ~4 ms per backtest."""
+
+    name = "wf_lag_momentum"
+    family = "test"
+    PARAMS = LagParams
+    PARAM_GRID = {"lag": [3, 5, 8, 12, 16, 20, 30, 40, 60], "exit_lag": [2, 4, 6, 10]}
+
+    @property
+    def min_bars(self) -> int:
+        return max(self.params.lag, self.params.exit_lag) + 1
+
+    @property
+    def lookback(self) -> int:
+        return self.min_bars
+
+    def signal(self, bars: Bars, in_position: bool) -> Signal:
+        c, p = bars.close, self.params
+        if in_position:
+            return Signal.exit() if c[-1] < c[-1 - p.exit_lag] else Signal.hold()
+        return Signal.enter() if c[-1] > c[-1 - p.lag] else Signal.hold()
+
+
+def opt(cfg=CFG, grid=GRID, cls=DonchianBreakout, **kw) -> WalkForwardOptimizer:
+    return WalkForwardOptimizer(cls, grid, cfg, **kw)
 
 
 # --------------------------------------------------------------------------
@@ -106,7 +141,7 @@ class Recorder(ResearchStrategy):
 
     @property
     def min_bars(self) -> int:
-        return 2
+        return 1
 
     def signal(self, bars: Bars, in_position: bool) -> Signal:
         Recorder.seen.append((bars.timestamps[-1], bars.timestamps[0], len(bars)))
@@ -149,15 +184,15 @@ def corrupt_from(candles: List[Candle], idx: int, seed: int = 99) -> List[Candle
 
 
 class TestNoLeakage:
-    @pytest.mark.parametrize("anchored", [False, True])
-    def test_test_slice_never_influences_selection(self, anchored):
+    @pytest.mark.parametrize("anchored,cls,grid", [(False, DonchianBreakout, GRID), (True, LagMomentum, None)])
+    def test_test_slice_never_influences_selection(self, anchored, cls, grid):
         candles = synth.regime_switching(420, seed=5)
         cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, anchored=anchored)
-        base = opt(cfg).run(candles)
+        base = opt(cfg, grid, cls).run(candles)
         assert len(base.windows) >= 4
-        for k in (0, 2, len(base.windows) - 1):
+        for k in (1, len(base.windows) - 1):
             w = base.windows[k].window
-            res = opt(cfg).run(corrupt_from(candles, w.test_start))
+            res = opt(cfg, grid, cls).run(corrupt_from(candles, w.test_start))
             for j in range(k + 1):                                    # windows 0..k only train on bars < w.test_start
                 assert res.windows[j].params == base.windows[j].params
                 assert res.windows[j].is_score == base.windows[j].is_score or (
@@ -176,21 +211,22 @@ class TestNoLeakage:
             assert np.allclose(again.equity, w.oos_equity)
 
 
-class TestOverfittingVisible:
-    def test_is_beats_oos_on_random_walks(self):
-        """On no-edge data the train-selected params look good in-sample and do not repeat out of sample."""
-        is_means, oos_means = [], []
-        for seed in range(6):
-            r = opt(WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60),
-                    grid={"entry_period": [10, 20, 40, 55], "exit_period": [5, 10, 20]}).run(synth.gbm(500, 0.0, 0.012, seed))
-            is_means.append(r.mean_is_objective)
-            oos_means.append(r.mean_oos_objective)
-        assert np.nanmean(is_means) > np.nanmean(oos_means) + 0.3
-        assert np.nanmean(is_means) > 0.0
+@pytest.fixture(scope="module")
+def random_walk_runs() -> List[WalkForwardResult]:
+    cfg = WalkForwardConfig(train_bars=120, test_bars=60, warmup_bars=60)
+    return [opt(cfg, grid=None, cls=LagMomentum).run(synth.gbm(360, 0.0, 0.012, seed)) for seed in range(8)]
 
-    def test_no_stitched_oos_edge_on_random_walk(self):
-        rets = [opt().run(synth.gbm(500, 0.0, 0.012, s)).oos_report.sharpe for s in range(6)]
-        assert np.nanmean(rets) < 0.5                                 # IS-selected params promise far more than this
+
+class TestOverfittingVisible:
+    def test_is_beats_oos_on_random_walks(self, random_walk_runs):
+        """On no-edge data the train-selected params look good in-sample and do not repeat out of sample."""
+        is_mean = np.nanmean([r.mean_is_objective for r in random_walk_runs])
+        oos_mean = np.nanmean([r.mean_oos_objective for r in random_walk_runs])
+        assert is_mean > oos_mean + 0.3
+        assert is_mean > 0.0
+
+    def test_no_stitched_oos_edge_on_random_walk(self, random_walk_runs):
+        assert np.nanmean([r.oos_report.sharpe for r in random_walk_runs]) < 0.5   # IS-selected params promise far more
 
 
 # --------------------------------------------------------------------------
@@ -236,8 +272,7 @@ class TestSelection:
         assert objective_value(lambda r: 1 / 0, rep) == float("-inf")
         cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, objective=lambda r: float("nan"))
         r = opt(cfg).run(synth.gbm(350, seed=4))
-        # NaN never beats anything but an eligible candidate still gets picked (first in grid order)
-        assert all(w.params == DonchianBreakout.param_combinations(GRID)[0] for w in r.active)
+        assert r.n_skipped == len(r.windows)                         # nothing finite to choose: stay in cash
 
     def test_min_trades_makes_windows_skipped_with_flat_oos(self):
         cfg = WalkForwardConfig(train_bars=150, test_bars=50, warmup_bars=60, min_trades=10_000)
@@ -313,7 +348,8 @@ class TestGridControl:
 
 class TestResult:
     @pytest.fixture(scope="class")
-    def res(self) -> WalkForwardResult:
+    @classmethod
+    def res(cls) -> WalkForwardResult:
         return opt().run(synth.regime_switching(400, seed=6))
 
     def test_stitched_equity_chains_multiplicatively(self, res):

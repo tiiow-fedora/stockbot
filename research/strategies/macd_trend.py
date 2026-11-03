@@ -22,7 +22,8 @@ ENTER  a bullish cross (hist <= 0 on the previous bar, hist > 0 on the next)
        [and, if ``slope_confirm``, hist is still rising (hist > previous hist)]
 EXIT   hist < 0 (bearish cross: MACD below its signal line)
 
-``cross_window`` > 1 lets a missed or stopped-out signal be re-taken for a few
+Histogram values within 1e-7 of price of zero count as zero (a perfectly smooth ramp
+has no real crosses, only float noise). ``cross_window`` > 1 lets a missed or stopped-out signal be re-taken for a few
 bars (the strategy is stateless and cannot remember a cross it did not act on).
 Signal strength = 0.5 + 0.5 * tanh(hist / (0.1 * ATR)): histogram size relative
 to the typical daily range, so a decisive cross gets the full position.

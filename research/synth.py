@@ -19,7 +19,7 @@ Generators
 ``garch``                volatility clustering (GARCH(1,1) returns)
 ``jump_diffusion``       GBM + Poisson jumps (gap risk)
 ``range_then_breakout``  repeated consolidation -> breakout cycles
-``cyclical``             sine-wave cycle + noise
+``cyclical``             sine-wave cycle + noise (adversarial for lagging indicators)
 ``v_shape``              crash then recovery
 ``flat``                 (almost) constant price - degenerate input
 ``cointegrated_pair``    two series sharing a stochastic trend (pairs trading)
@@ -243,7 +243,11 @@ def range_then_breakout(
 
 def cyclical(n: int = 600, period: int = 40, amplitude: float = 0.08, noise: float = 0.004,
              seed: int = 0, start_price: float = 100.0, symbol: str = "CYC") -> List[Candle]:
-    """Sine-wave log price with period ``period`` bars plus noise: oscillators/reversion shine."""
+    """Sine-wave log price with period ``period`` bars plus noise.
+
+    Reversion only pays when the cycle is SHORT relative to the strategy's lookback (e.g. period ~10-16
+    for a 20-bar band). With the default 40-bar cycle the moves are smooth and autocorrelated at the
+    20-bar horizon, so both reversion and slow trend-following lose - useful as an adversarial case."""
     t = np.arange(n)
     x = amplitude * np.sin(2 * np.pi * t / period) + np.cumsum(_rng(seed).normal(0.0, noise, n)) * 0.2
     return candles_from_closes(start_price * np.exp(x), symbol, seed)

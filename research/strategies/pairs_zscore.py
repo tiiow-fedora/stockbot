@@ -15,8 +15,11 @@ is NOT traded - this is half a pairs trade and keeps full market exposure.
 
 Rules (long-only, daily bars; the partner is a ``List[Candle]`` passed as ``partner=``)
 -----------------------------------------------------------------------------
-spread_t = log(P_t) - beta_t * log(Q_t); beta_t is the rolling OLS slope of log P on
-log Q over ``beta_window`` bars (``rolling_beta=True``) or ``fixed_beta``.
+spread_t = log(P_t) - beta * log(Q_t); beta is ``fixed_beta`` (default 1, i.e. the log price
+ratio) or, with ``rolling_beta=True``, the rolling OLS slope of log P on log Q over
+``beta_window`` bars. Measured on synth.cointegrated_pair the rolling fit is WORSE: a short
+window partly fits the very spread deviations we want to trade and removes most of the
+signal. Use it only when the true hedge ratio is unknown and drifting, with a long window.
 z = (spread - mean) / std over the last ``z_window`` spread values.
 ENTER  -stop_z <= z < -entry_z (this leg is cheap vs the partner, but not so far gone that the
        stop would fire immediately)
@@ -56,13 +59,13 @@ from research.strategies import _partner
 
 @dataclass(frozen=True)
 class PairsZScoreParams(StrategyParams):
-    z_window: int = 30
-    beta_window: int = 60
+    z_window: int = 60
+    beta_window: int = 120
     corr_window: int = 60
     entry_z: float = 2.0
     exit_z: float = 0.5
     stop_z: float = 4.0
-    rolling_beta: bool = True
+    rolling_beta: bool = False
     fixed_beta: float = 1.0
     cointegration_check: bool = False
     min_corr: float = 0.5
@@ -90,7 +93,9 @@ class PairsZScore(ResearchStrategy):
     family = "pairs"
     description = "Buy this instrument when its log spread vs a partner is unusually low; sell when it reverts (long leg only)."
     PARAMS = PairsZScoreParams
-    PARAM_GRID = {"z_window": [20, 30, 60], "entry_z": [1.5, 2.0, 2.5], "exit_z": [0.0, 0.5]}
+    PARAM_GRID = {
+        "z_window": [30, 60, 100], "entry_z": [1.5, 2.0, 2.5], "exit_z": [0.0, 0.5], "rolling_beta": [False, True],
+    }
     requires_partner = True
 
     def __init__(self, params: Optional[StrategyParams] = None, partner: Optional[List[Candle]] = None, **overrides: Any):

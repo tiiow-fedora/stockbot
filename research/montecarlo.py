@@ -532,7 +532,7 @@ def price_path_robustness(
         percentiles=percentiles,
         probabilities={"profitable": float(np.mean(ret[ok] > 0)) if ok.any() else float("nan"),
                        "beats_buy_hold": float(np.mean(ret[ok] > bench[ok])) if ok.any() else float("nan"),
-                       "no_trades": float(np.mean(cols["num_trades"] == 0))},
+                       "no_closed_trades": float(np.mean(cols["num_trades"] == 0))},
         extras={k: describe(v, percentiles) for k, v in cols.items() if k != "total_return"},
         meta={"method": method, "block_len": block_len, "seed": seed, "n_bars": len(candles), "real": one(candles)},
     )
@@ -713,4 +713,4 @@ def monte_carlo_report(
             lines.append(pp.summary() + f" plateau_score_threshold={_fmt(pp.meta['threshold'])}")
     out["parameter_perturbation"] = pp.to_dict() if pp else None
     out["text"] = "\n".join(lines)
-    return out
+    return _clean(out)

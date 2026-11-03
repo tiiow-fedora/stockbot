@@ -72,7 +72,7 @@ class TestEntryRules:
         assert small.kind.value == big.kind.value == "ENTER"
         assert 0.5 <= small.strength < big.strength <= 1.0
 
-    def test_ignored_signal_flat_vs_long(self):
+    def test_no_pyramiding_when_long(self):
         bar = with_last(100.0, 103.2, 100.5, 103.0)
         assert kind(AtrExpansionBreakout(), bar, in_position=True) == "HOLD"  # already long: no pyramiding
 

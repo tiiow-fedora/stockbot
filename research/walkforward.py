@@ -99,9 +99,13 @@ class WalkForwardConfig:
       callable ``PerformanceReport -> float``. Non-finite values (NaN, +-inf) are
       treated as ``-inf`` (worst possible), so an undefined metric never wins.
     * ``min_trades``: a candidate with fewer than this many CLOSED trades on the
-      train window is ineligible (ranked below every eligible one). If no
-      candidate is eligible the window is skipped: no params are chosen, the OOS
-      block is held in cash and it is flagged ``skipped``.
+      train window is ineligible. Default 0: note that a position still open at
+      the end of the window is NOT a closed trade, so in a clean trend a
+      buy-and-hold-like candidate has 0 closed trades; raising the bar excludes it.
+      A candidate whose objective is non-finite (NaN/inf, e.g. Sharpe of a flat
+      curve) can never be chosen. If no candidate is eligible AND finite the window
+      is skipped: no params are chosen, the OOS block is held in cash and it is
+      flagged ``skipped``.
     * ``warmup_bars``: extra bars before each window given to the strategy as
       history so indicators are warm when the first decision is made.
     """
@@ -111,7 +115,7 @@ class WalkForwardConfig:
     step_bars: Optional[int] = None
     anchored: bool = False
     objective: Objective = "sharpe"
-    min_trades: int = 1
+    min_trades: int = 0
     warmup_bars: int = 60
     starting_balance: float = 100_000.0
     periods_per_year: int = 252
@@ -468,6 +472,8 @@ def _run_window(job: _Job) -> WindowResult:
             continue
         n_eligible += 1
         score = objective_value(cfg.objective, rep)
+        if score == _NEG_INF:
+            continue
         if best is None or score > best[0]:
             best, best_report = (score, i), rep
 

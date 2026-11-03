@@ -80,9 +80,6 @@ class TestRules:
         s = VolSpikeReversion()
         assert s.signal(bars_from_closes(panic_series()), True).kind.value == "HOLD"
 
-    def test_enter_condition_while_long_is_hold_not_enter(self):
-        assert VolSpikeReversion().signal(bars_from_closes(panic_series()), True).kind.value == "HOLD"
-
     def test_strength_grows_with_spike_ratio(self):
         s = VolSpikeReversion()
         mild = s.signal(bars_from_closes(panic_series()), False)
