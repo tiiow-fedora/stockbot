@@ -23,6 +23,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from core.http import apply_default_timeout
 from core.logging import get_logger
 from core.models import Candle, MarketSnapshot, NewsItem
 from data.base import MarketDataError, MarketDataProvider, NewsDataProvider
@@ -53,7 +54,7 @@ class AlpacaMarketDataProvider(MarketDataProvider):
             ) from exc
 
         api_key, secret_key = _get_credentials()
-        self._client = StockHistoricalDataClient(api_key, secret_key)
+        self._client = apply_default_timeout(StockHistoricalDataClient(api_key, secret_key))
 
     def get_historical_candles(
         self, symbol: str, start: datetime, end: datetime, timeframe: str = "1Day"
@@ -162,7 +163,7 @@ class AlpacaNewsProvider(NewsDataProvider):
             ) from exc
 
         api_key, secret_key = _get_credentials()
-        self._client = NewsClient(api_key, secret_key)
+        self._client = apply_default_timeout(NewsClient(api_key, secret_key))
 
     def get_news(self, symbol: str, start: datetime, end: datetime) -> List[NewsItem]:
         from alpaca.data.requests import NewsRequest

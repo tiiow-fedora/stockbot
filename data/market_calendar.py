@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, time as dt_time, timedelta, timezone
 from typing import Optional
 
+from core.http import apply_default_timeout
 from core.logging import get_logger
 from data.base import MarketDataError
 
@@ -115,7 +116,7 @@ class AlpacaMarketCalendar(MarketCalendar):
             ) from exc
 
         api_key, secret_key = _get_alpaca_credentials()
-        self._client = TradingClient(api_key, secret_key, paper=True)
+        self._client = apply_default_timeout(TradingClient(api_key, secret_key, paper=True))
 
     def is_open(self, timestamp: datetime) -> bool:
         return bool(self._client.get_clock().is_open)
