@@ -18,6 +18,7 @@ dependency-injection seam described in the project spec.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -28,16 +29,21 @@ from dotenv import load_dotenv
 
 from analysis.sentiment import SentimentScorer, build_sentiment_scorer
 from core.config import AppConfig, load_config
-from core.logging import get_logger, setup_logging
+from core.logging import get_logger
 from core.models import Action
 from data.base import MarketDataProvider
-from data.market_data import MarketDataService
+from data.market_data import MarketDataService, completed_bars
 from data.news_data import build_news_provider
 from database.database import DatabaseManager
 from execution.base import OrderExecutor
 from execution.manual import ManualExecutor
 from execution.order_builder import decision_to_order, route_order
 from execution.paper import PaperExecutor
+from observability import metrics
+from observability.health import HealthState, start_server
+from observability.jsonlog import configure_logging
+from observability.shutdown import GracefulShutdown
+from observability.validation import ConfigError, ensure_valid, validate_config
 from portfolio.portfolio import Portfolio
 from portfolio.risk import RiskManager
 from strategy.base import Strategy
@@ -64,6 +70,12 @@ def build_market_data_provider(config: AppConfig) -> MarketDataProvider:
         from data.providers.alpaca import AlpacaMarketDataProvider
 
         return AlpacaMarketDataProvider()
+    if provider == "class_simulator":
+        from data.providers.class_simulator import ClassSimulatorMarketDataProvider
+
+        return ClassSimulatorMarketDataProvider(
+            quotes_path=config.data.class_simulator_quotes_path, history_dir=config.data.csv_dir
+        )
     raise ValueError(f"unknown data provider: {provider!r}")
 
 
@@ -81,6 +93,10 @@ def build_executor(config: AppConfig) -> OrderExecutor:
         return paper
     if config.execution.mode == "manual":
         return ManualExecutor()
+    if config.execution.mode == "class_simulator":
+        from execution.class_simulator import ClassSimulatorExecutor
+
+        return ClassSimulatorExecutor(config.execution.class_simulator_outbox)
     raise ValueError(f"unknown execution mode: {config.execution.mode!r}")
 
 
@@ -118,6 +134,10 @@ def run_live_loop(config: AppConfig) -> None:
     portfolio = Portfolio(config.starting_balance)
     calendar = build_market_calendar(config)
 
+    shutdown = GracefulShutdown().install()
+    health, health_server = _start_observability(config, db)
+    metrics.set_info(config.execution.mode, config.data.provider, config.strategy.name)
+
     logger.info(
         "StockBot starting: symbols=%s provider=%s execution_mode=%s starting_balance=%.2f market_calendar=%s",
         config.symbols,
@@ -129,21 +149,30 @@ def run_live_loop(config: AppConfig) -> None:
 
     consecutive_failures = 0
     try:
-        while True:
+        while not shutdown.requested:
             try:
                 now = datetime.now(timezone.utc)
-                if not calendar.is_open(now):
+                is_open = calendar.is_open(now)
+                metrics.set_market_open(is_open)
+                if not is_open:
                     sleep_seconds = _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now)
                     consecutive_failures = 0
-                    time.sleep(sleep_seconds)
+                    metrics.record_cycle("closed")
+                    health.beat()
+                    with shutdown.interruptible():
+                        time.sleep(sleep_seconds)
                     continue
 
+                cycle_started = time.monotonic()
                 _run_cycle(
                     config, db, provider, market_data, news_provider, sentiment_scorer,
                     strategy, risk_manager, executor, portfolio,
                 )
                 consecutive_failures = 0
-                time.sleep(config.polling_interval_seconds)
+                metrics.record_cycle("ok", time.monotonic() - cycle_started)
+                health.beat()
+                with shutdown.interruptible():
+                    time.sleep(config.polling_interval_seconds)
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
@@ -156,6 +185,7 @@ def run_live_loop(config: AppConfig) -> None:
                 # and retry instead, and only log the traceback on the first
                 # failure of a streak so a long outage does not flood the log.
                 consecutive_failures += 1
+                metrics.record_failure(consecutive_failures)
                 backoff = min(
                     RETRY_BACKOFF_BASE_SECONDS * (2 ** (consecutive_failures - 1)),
                     RETRY_BACKOFF_MAX_SECONDS,
@@ -165,9 +195,42 @@ def run_live_loop(config: AppConfig) -> None:
                     consecutive_failures, exc, backoff,
                     exc_info=(consecutive_failures == 1),
                 )
-                time.sleep(backoff)
+                with shutdown.interruptible():
+                    time.sleep(backoff)
     except KeyboardInterrupt:
-        logger.info("StockBot stopped by user.")
+        pass
+    finally:
+        health.shutting_down = True
+        logger.info("StockBot shutting down (%s).", "signal" if shutdown.requested else "interrupt")
+        shutdown.uninstall()
+        if health_server is not None:
+            health_server.shutdown()
+            health_server.server_close()
+
+
+def _db_ping(db) -> bool:
+    from sqlalchemy import text
+
+    with db.engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    return True
+
+
+def _start_observability(config: AppConfig, db):
+    """Health/metrics HTTP server on $METRICS_PORT (default 9108, 0 disables).
+    Failure to bind is logged, never fatal - observability must not stop trading."""
+    stale_after = max(config.polling_interval_seconds * 5, config.max_closed_market_heartbeat_seconds * 2, 120)
+    health = HealthState(stale_after=stale_after, db_check=lambda: _db_ping(db))
+    port = int(os.environ.get("METRICS_PORT", "9108"))
+    if port == 0:
+        return health, None
+    try:
+        server = start_server(health, port)
+        logger.info("Health/metrics server listening on :%d (/healthz /readyz /metrics)", port)
+        return health, server
+    except OSError as exc:
+        logger.warning("Could not start health/metrics server on :%d: %s", port, exc)
+        return health, None
 
 
 def _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now: datetime) -> float:
@@ -187,7 +250,12 @@ def _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now: d
             logger.warning("Market data unavailable for %s while closed: %s", symbol, exc)
 
     if prices:
-        db.save_portfolio_snapshot(portfolio.snapshot(now, prices))
+        closed_snapshot = portfolio.snapshot(now, prices)
+        db.save_portfolio_snapshot(closed_snapshot)
+        metrics.record_portfolio(
+            closed_snapshot.total_value, closed_snapshot.cash, closed_snapshot.positions_value,
+            len(portfolio.positions),
+        )
 
     next_open = calendar.next_open(now)
     seconds_until_open = max(1.0, (next_open - now).total_seconds())
@@ -201,6 +269,19 @@ def _heartbeat_while_closed(config, db, market_data, portfolio, calendar, now: d
     return sleep_seconds
 
 
+def _completed_history(history, snapshot, timeframe: str):
+    """Candles strictly before the one the snapshot represents.
+
+    For daily bars the provider builds the snapshot from today's still-forming
+    bar, which is ALSO the last element of the fetched history (its timestamp
+    is the session start, earlier than `now`). Keeping it made the strategy see
+    today's price and volume twice and made live disagree with the backtester,
+    which uses bars[:i] as history and bar i as the snapshot."""
+    if timeframe == "1Day":
+        return [c for c in history if c.timestamp.date() < snapshot.timestamp.date()]
+    return [c for c in history if c.timestamp < snapshot.timestamp]
+
+
 def _run_cycle(
     config, db, provider, market_data, news_provider, sentiment_scorer, strategy, risk_manager, executor, portfolio
 ) -> None:
@@ -212,6 +293,7 @@ def _run_cycle(
             snapshot = market_data.get_snapshot(symbol)
         except Exception as exc:
             logger.error("Market data outage for %s: %s", symbol, exc)
+            metrics.record_data_error(symbol)
             continue
         snapshots[symbol] = snapshot
         prices[symbol] = snapshot.price
@@ -222,12 +304,19 @@ def _run_cycle(
 
     # Protective exits first, across every symbol currently held.
     for order in risk_manager.check_stop_loss_take_profit(portfolio, prices):
-        route_order(order, risk_manager, portfolio, executor, prices, prices[order.symbol], order.timestamp, db)
+        # Guarded per order: an exception here (executor/DB hiccup on one
+        # symbol) used to escape _run_cycle, skipping every other exit and
+        # every strategy decision this cycle - and since the same stop-loss
+        # fires again next cycle, it could wedge the whole loop indefinitely.
+        try:
+            route_order(order, risk_manager, portfolio, executor, prices, prices[order.symbol], order.timestamp, db)
+        except Exception:
+            logger.exception("Protective exit for %s failed this cycle; will retry next cycle", order.symbol)
 
     for symbol, snapshot in snapshots.items():
         try:
             history = market_data.get_history(symbol, config.data.history_lookback_days, config.data.timeframe)
-            history = [c for c in history if c.timestamp < snapshot.timestamp]
+            history = completed_bars(history, snapshot.timestamp, config.data.timeframe)
 
             news_start = snapshot.timestamp - timedelta(days=1)
             news = news_provider.get_news(symbol, news_start, snapshot.timestamp)
@@ -246,6 +335,7 @@ def _run_cycle(
                 portfolio_value=portfolio.total_value(prices),
             )
             db.save_decision(decision)
+            metrics.record_decision(symbol, decision.action.value)
             logger.info(
                 "%s score=%.3f decision=%s confidence=%.2f",
                 symbol,
@@ -264,6 +354,10 @@ def _run_cycle(
     snapshot_ts = next(iter(snapshots.values())).timestamp
     portfolio_snapshot = portfolio.snapshot(snapshot_ts, prices)
     db.save_portfolio_snapshot(portfolio_snapshot)
+    metrics.record_portfolio(
+        portfolio_snapshot.total_value, portfolio_snapshot.cash, portfolio_snapshot.positions_value,
+        len(portfolio.positions),
+    )
     logger.info(
         "Portfolio: cash=%.2f positions_value=%.2f total_value=%.2f",
         portfolio_snapshot.cash,
@@ -392,6 +486,7 @@ def main() -> None:
     )
 
     sub.add_parser("init-db", help="create database tables and exit")
+    sub.add_parser("validate-config", help="validate config + environment and exit (non-zero on errors)")
 
     dashboard_parser = sub.add_parser("dashboard", help="run the read-only web dashboard")
     dashboard_parser.add_argument("--host", default="0.0.0.0")
@@ -410,7 +505,22 @@ def main() -> None:
 
     args = parser.parse_args()
     config = load_config(args.config)
-    setup_logging(config.log_level, config.log_file)
+    configure_logging(config.log_level, config.log_file)
+
+    if args.command == "validate-config":
+        issues = validate_config(config)
+        for issue in issues:
+            print(issue)
+        errors = [i for i in issues if i.level == "error"]
+        print(f"{len(errors)} error(s), {len(issues) - len(errors)} warning(s)")
+        sys.exit(1 if errors else 0)
+    if args.command in ("run", "dashboard"):
+        try:
+            for issue in ensure_valid(config):
+                logger.warning("config: %s", issue)
+        except ConfigError as exc:
+            logger.error("%s", exc)
+            sys.exit(2)
 
     if args.command == "run":
         run_live_loop(config)

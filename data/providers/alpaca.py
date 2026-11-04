@@ -23,6 +23,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from core.http import apply_default_timeout
 from core.logging import get_logger
 from core.models import Candle, MarketSnapshot, NewsItem
 from data.base import MarketDataError, MarketDataProvider, NewsDataProvider
@@ -53,7 +54,7 @@ class AlpacaMarketDataProvider(MarketDataProvider):
             ) from exc
 
         api_key, secret_key = _get_credentials()
-        self._client = StockHistoricalDataClient(api_key, secret_key)
+        self._client = apply_default_timeout(StockHistoricalDataClient(api_key, secret_key))
 
     def get_historical_candles(
         self, symbol: str, start: datetime, end: datetime, timeframe: str = "1Day"
@@ -89,20 +90,33 @@ class AlpacaMarketDataProvider(MarketDataProvider):
         except Exception as exc:  # network/auth/rate-limit failures
             raise MarketDataError(f"Alpaca historical bars request failed for {symbol}: {exc}") from exc
 
+        try:
+            raw_bars = bars[symbol]
+        except KeyError:
+            # alpaca-py's BarSet raises KeyError for a symbol with no bars in
+            # the window (halted, delisted, bad ticker). Treat as "no data"
+            # so callers see MarketDataError from get_snapshot, not KeyError.
+            return []
+
         candles: List[Candle] = []
-        for bar in bars[symbol]:
-            candles.append(
-                Candle(
-                    symbol=symbol,
-                    timestamp=bar.timestamp,
-                    open=float(bar.open),
-                    high=float(bar.high),
-                    low=float(bar.low),
-                    close=float(bar.close),
-                    volume=int(bar.volume),
-                    timeframe=timeframe,
+        for bar in raw_bars:
+            try:
+                candles.append(
+                    Candle(
+                        symbol=symbol,
+                        timestamp=bar.timestamp,
+                        open=float(bar.open),
+                        high=float(bar.high),
+                        low=float(bar.low),
+                        close=float(bar.close),
+                        volume=int(bar.volume),
+                        timeframe=timeframe,
+                    )
                 )
-            )
+            except (ValueError, TypeError) as exc:
+                # One malformed bar (zero/NaN price, high < low) must not
+                # discard the symbol's whole history.
+                logger.warning("Skipping malformed %s bar at %s: %s", symbol, getattr(bar, "timestamp", "?"), exc)
         return candles
 
     def get_snapshot(self, symbol: str) -> MarketSnapshot:
@@ -126,11 +140,23 @@ class AlpacaMarketDataProvider(MarketDataProvider):
             raise MarketDataError(f"no recent daily bar available for {symbol}")
 
         latest = candles[-1]
+        volume = latest.volume
+        from zoneinfo import ZoneInfo
+
+        et = ZoneInfo("America/New_York")
+        if latest.timestamp.astimezone(et).date() == now.astimezone(et).date():
+            # Today's bar is still forming: its volume is "so far today",
+            # but the history it is compared against is FULL days. Project
+            # it to a full-day figure so intraday cycles don't all read as
+            # a volume collapse.
+            from data.market_calendar import project_full_day_volume
+
+            volume = project_full_day_volume(latest.volume, now)
         return MarketSnapshot(
             symbol=symbol,
             timestamp=now,
             price=latest.close,
-            volume=latest.volume,
+            volume=volume,
             open=latest.open,
             high=latest.high,
             low=latest.low,
@@ -149,7 +175,7 @@ class AlpacaNewsProvider(NewsDataProvider):
             ) from exc
 
         api_key, secret_key = _get_credentials()
-        self._client = NewsClient(api_key, secret_key)
+        self._client = apply_default_timeout(NewsClient(api_key, secret_key))
 
     def get_news(self, symbol: str, start: datetime, end: datetime) -> List[NewsItem]:
         from alpaca.data.requests import NewsRequest
@@ -163,14 +189,20 @@ class AlpacaNewsProvider(NewsDataProvider):
 
         items: List[NewsItem] = []
         for article in response.data.get("news", []):
-            items.append(
-                NewsItem(
-                    symbol=symbol,
-                    timestamp=article.created_at,
-                    headline=article.headline,
-                    source=article.source or "alpaca",
-                    sentiment=None,  # Alpaca does not score sentiment; left for an optional module.
-                    url=getattr(article, "url", None),
+            try:
+                items.append(
+                    NewsItem(
+                        symbol=symbol,
+                        timestamp=article.created_at,
+                        headline=article.headline,
+                        source=article.source or "alpaca",
+                        sentiment=None,  # Alpaca does not score sentiment; left for an optional module.
+                        url=getattr(article, "url", None),
+                    )
                 )
-            )
+            except (ValueError, TypeError, AttributeError) as exc:
+                # One malformed article (e.g. a naive timestamp) must not
+                # discard the batch - or, worse, make _run_cycle skip the
+                # whole symbol for as long as it stays in the news window.
+                logger.warning("Skipping malformed news article for %s: %s", symbol, exc)
         return items

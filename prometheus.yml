@@ -1,0 +1,6 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: stockbot
+    static_configs:
+      - targets: ["stockbot:9108"]

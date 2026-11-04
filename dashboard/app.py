@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from core.config import AppConfig, load_config
 from database.database import DatabaseManager
@@ -35,6 +35,17 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     @app.get("/")
     def index():
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/healthz")
+    def healthz():
+        from sqlalchemy import text
+
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception:
+            return JSONResponse({"status": "db_down"}, status_code=503)
+        return {"status": "ok"}
 
     @app.get("/api/status")
     def status():

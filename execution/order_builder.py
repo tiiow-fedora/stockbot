@@ -17,6 +17,7 @@ from core.logging import get_logger
 from core.models import Action, Decision, Fill, Order, OrderSide, OrderType
 from database.database import DatabaseManager
 from execution.base import OrderExecutor
+from observability import metrics
 from portfolio.portfolio import Portfolio
 from portfolio.risk import RiskManager
 
@@ -77,6 +78,7 @@ def route_order(
 
     if not risk_decision.approved or risk_decision.quantity <= 0:
         logger.info("%s %s rejected by risk manager: %s", order.side.value, order.symbol, risk_decision.reason)
+        metrics.record_order(order.side.value, "rejected", risk_decision.reason)
         if db:
             db.save_risk_rejection(
                 order.symbol, order.side.value, order.quantity, order.timestamp or timestamp, risk_decision.reason
@@ -88,6 +90,7 @@ def route_order(
 
     fill = executor.execute(order, fill_price, timestamp)
     if fill is not None:
+        metrics.record_order(order.side.value, "filled")
         portfolio.apply_fill(fill)
         if db:
             order_id = db.save_order(order)
