@@ -37,7 +37,7 @@ RESEARCH_RISK = RiskConfig(
     max_open_positions=8,
     max_trades_per_symbol_per_day=3,
     stop_loss_pct=0.50,
-    take_profit_pct=10.0,
+    take_profit_pct=1.0,  # RiskConfig caps this at 1.0 (+100%); effectively no take-profit for research runs
     min_cash_reserve_pct=0.02,
 )
 
