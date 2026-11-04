@@ -75,7 +75,13 @@ class RiskManager:
         min_cash_reserve = total_value * self.config.min_cash_reserve_pct
         available_cash = max(0.0, portfolio.cash - min_cash_reserve)
 
-        target_value = min(target_value, available_cash)
+        # Also respect the portfolio-wide exposure cap. Without this the sizer
+        # proposes an order evaluate_order() then vetoes outright whenever the
+        # book is near the cap, so a BUY that would have fit at a smaller size
+        # is silently lost instead of being scaled down.
+        exposure_room = max(0.0, total_value * self.config.max_portfolio_exposure_pct - portfolio.positions_value(prices))
+
+        target_value = min(target_value, available_cash, exposure_room)
         quantity = math.floor(target_value / price)
         return float(max(0, quantity))
 
