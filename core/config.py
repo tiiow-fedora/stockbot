@@ -46,13 +46,17 @@ class StrategyConfig(BaseModel):
 
 
 class RiskConfig(BaseModel):
-    max_position_size_pct: float = 0.20       # max fraction of portfolio value in one symbol
-    max_portfolio_exposure_pct: float = 0.80   # max fraction of portfolio value in all positions combined
-    max_open_positions: int = 8
-    max_trades_per_symbol_per_day: int = 3
-    stop_loss_pct: float = 0.08                # exit if position down 8% from entry
-    take_profit_pct: float = 0.20              # exit if position up 20% from entry
-    min_cash_reserve_pct: float = 0.05         # always keep at least 5% of portfolio in cash
+    # All *_pct values are FRACTIONS (0.20 == 20%), not percents. The bounds
+    # below exist because a unit slip here fails silently: min_cash_reserve_pct: 5
+    # (meant 5%) reserves 500% of the portfolio so every BUY sizes to 0 shares;
+    # max_position_size_pct: 20 removes the cap; stop_loss_pct: 8 never fires.
+    max_position_size_pct: float = Field(0.20, gt=0, le=1)       # max fraction of portfolio value in one symbol
+    max_portfolio_exposure_pct: float = Field(0.80, gt=0, le=1)  # max fraction of portfolio value in all positions combined
+    max_open_positions: int = Field(8, ge=0)   # 0 is a legitimate "no new positions" kill switch
+    max_trades_per_symbol_per_day: int = Field(3, ge=0)
+    stop_loss_pct: float = Field(0.08, gt=0, lt=1)               # exit if position down 8% from entry
+    take_profit_pct: float = Field(0.20, gt=0, le=10)            # exit if position up 20% from entry
+    min_cash_reserve_pct: float = Field(0.05, ge=0, lt=1)        # always keep at least 5% of portfolio in cash
 
 
     @field_validator(
@@ -71,9 +75,9 @@ class RiskConfig(BaseModel):
 
 class ExecutionConfig(BaseModel):
     mode: str = "paper"                # "paper" or "manual"
-    slippage_bps: float = 5.0          # basis points of adverse price movement on fill
-    commission_per_trade: float = 0.0  # flat fee per fill
-    commission_pct: float = 0.0        # percentage fee per fill (in addition to flat fee)
+    slippage_bps: float = Field(5.0, ge=0, le=1000)          # basis points of adverse price movement on fill
+    commission_per_trade: float = Field(0.0, ge=0)           # flat fee per fill
+    commission_pct: float = Field(0.0, ge=0, lt=1)           # fraction fee per fill (in addition to flat fee)
     # Optional, off by default: best-effort mirror every local paper fill to
     # your own Alpaca PAPER account too, purely so trades also show up on
     # Alpaca's dashboard. Only takes effect when mode: paper. Requires
@@ -136,15 +140,15 @@ class BacktestConfig(BaseModel):
 
 class AppConfig(BaseModel):
     symbols: List[str] = Field(default_factory=lambda: ["AAPL", "MSFT", "NVDA"])
-    starting_balance: float = 100000.0
-    polling_interval_seconds: int = 60
+    starting_balance: float = Field(100000.0, gt=0)
+    polling_interval_seconds: int = Field(60, ge=1)
     # While the market is closed, the live loop re-checks (and writes a
     # heartbeat portfolio snapshot) at most this often rather than sleeping
     # straight through to the next open. Shared with the dashboard's
     # "running" vs "stale" status check, which must tolerate this slower
     # cadence during closed-market hours instead of assuming the normal
     # polling_interval_seconds pace around the clock.
-    max_closed_market_heartbeat_seconds: int = 1800
+    max_closed_market_heartbeat_seconds: int = Field(1800, ge=1)
     log_level: str = "INFO"
     log_file: Optional[str] = "logs/stockbot.log"
 

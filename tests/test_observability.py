@@ -80,7 +80,12 @@ def test_mirror_requires_paper_mode():
 
 
 def test_ensure_valid_raises_with_all_issues():
-    cfg = AppConfig(symbols=[], starting_balance=-1, **SYNTH)
+    # AppConfig itself now rejects a negative balance at construction (PR #6),
+    # so bypass that to exercise validate_config as the backstop.
+    with pytest.raises(ValidationError):
+        AppConfig(symbols=[], starting_balance=-1, **SYNTH)
+    cfg = AppConfig(symbols=[], **SYNTH)
+    object.__setattr__(cfg, "starting_balance", -1)
     with pytest.raises(ConfigError) as ei:
         ensure_valid(cfg, {})
     assert len(ei.value.issues) >= 2

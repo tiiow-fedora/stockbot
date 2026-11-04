@@ -27,9 +27,11 @@ authoritative one for backtesting, risk decisions, and the dashboard.
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import datetime
 from typing import Optional
 
+from core.http import apply_default_timeout
 from core.logging import get_logger
 from core.models import Fill, Order, OrderSide
 from execution.base import ExecutionError, OrderExecutor
@@ -62,7 +64,7 @@ class AlpacaMirrorExecutor(OrderExecutor):
 
         self._inner = inner
         api_key, secret_key = _get_alpaca_credentials()
-        self._client = TradingClient(api_key, secret_key, paper=True)
+        self._client = apply_default_timeout(TradingClient(api_key, secret_key, paper=True))
 
     def execute(self, order: Order, market_price: float, timestamp: datetime) -> Optional[Fill]:
         fill = self._inner.execute(order, market_price, timestamp)
@@ -76,11 +78,20 @@ class AlpacaMirrorExecutor(OrderExecutor):
             from alpaca.trading.requests import MarketOrderRequest
 
             side = AlpacaOrderSide.BUY if order.side == OrderSide.BUY else AlpacaOrderSide.SELL
+            # Idempotency key. alpaca-py transparently retries POST /orders on
+            # 429/504; a 504 can mean "processed but the gateway timed out",
+            # so without a client_order_id the retry places a SECOND order.
+            # Alpaca rejects a repeated client_order_id, making retries (ours
+            # or the library's) safe. Stored on the Order so a re-mirror of
+            # the same Order reuses the key.
+            if not order.id:
+                order.id = str(uuid.uuid4())
             request = MarketOrderRequest(
                 symbol=order.symbol,
                 qty=order.quantity,
                 side=side,
                 time_in_force=TimeInForce.DAY,
+                client_order_id=order.id,
             )
             alpaca_order = self._client.submit_order(request)
             logger.info(

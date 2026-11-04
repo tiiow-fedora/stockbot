@@ -10,6 +10,7 @@ where data came from and the executor ignorant of where orders end up.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -52,7 +53,10 @@ class MarketSnapshot:
 
     def __post_init__(self) -> None:
         _require_tz_aware(self.timestamp, "MarketSnapshot.timestamp")
-        if self.price is None or self.price <= 0:
+        # `not (x > 0)` (rather than `x <= 0`) so NaN is rejected too: every
+        # comparison with NaN is False, and a NaN price would otherwise sail
+        # through into indicators and sizing and silently suppress signals.
+        if self.price is None or not math.isfinite(self.price) or not (self.price > 0):
             raise ValueError(f"invalid price for {self.symbol}: {self.price!r}")
         if self.volume is not None and self.volume < 0:
             raise ValueError(f"invalid volume for {self.symbol}: {self.volume!r}")
@@ -74,7 +78,7 @@ class Candle:
     def __post_init__(self) -> None:
         _require_tz_aware(self.timestamp, "Candle.timestamp")
         for name, val in (("open", self.open), ("high", self.high), ("low", self.low), ("close", self.close)):
-            if val is None or val <= 0:
+            if val is None or not math.isfinite(val) or not (val > 0):
                 raise ValueError(f"invalid {name} for {self.symbol} at {self.timestamp}: {val!r}")
         if self.high < self.low:
             raise ValueError(f"high < low for {self.symbol} at {self.timestamp}")
