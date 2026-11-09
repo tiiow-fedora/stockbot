@@ -46,7 +46,18 @@ class ConfigError(ValueError):
         super().__init__("invalid configuration:\n  " + "\n  ".join(str(i) for i in issues))
 
 
-def validate_config(config: AppConfig, env: Optional[Mapping[str, str]] = None) -> List[Issue]:
+def validate_config(
+    config: AppConfig,
+    env: Optional[Mapping[str, str]] = None,
+    require_credentials: bool = True,
+) -> List[Issue]:
+    """Validate ``config`` against ``env``.
+
+    ``require_credentials=False`` skips the "API key is present" checks. The
+    read-only dashboard uses it: it only reads the database and is deployed
+    without the broker keys, so demanding them there just stops it starting.
+    The paper-only guards still run either way.
+    """
     env = os.environ if env is None else env
     out: List[Issue] = []
 
@@ -159,9 +170,15 @@ def validate_config(config: AppConfig, env: Optional[Mapping[str, str]] = None) 
         config.data.provider == "alpaca" or config.news.provider == "alpaca"
         or e.mirror_to_alpaca or config.data.market_calendar == "alpaca"
     )
-    if needs_alpaca and not (env.get("ALPACA_API_KEY") and env.get("ALPACA_SECRET_KEY")):
+    if require_credentials and needs_alpaca and not (
+        env.get("ALPACA_API_KEY") and env.get("ALPACA_SECRET_KEY")
+    ):
         err("env", "ALPACA_API_KEY / ALPACA_SECRET_KEY are required by the configured providers")
-    if config.news.sentiment_scorer == "llm" and not env.get("ANTHROPIC_API_KEY"):
+    if (
+        require_credentials
+        and config.news.sentiment_scorer == "llm"
+        and not env.get("ANTHROPIC_API_KEY")
+    ):
         err("env", "ANTHROPIC_API_KEY is required for news.sentiment_scorer: llm")
 
     # --- paper-only guard
@@ -180,9 +197,13 @@ def validate_config(config: AppConfig, env: Optional[Mapping[str, str]] = None) 
     return out
 
 
-def ensure_valid(config: AppConfig, env: Optional[Mapping[str, str]] = None) -> List[Issue]:
+def ensure_valid(
+    config: AppConfig,
+    env: Optional[Mapping[str, str]] = None,
+    require_credentials: bool = True,
+) -> List[Issue]:
     """Raise ConfigError on any error; return the (warning) issues otherwise."""
-    issues = validate_config(config, env)
+    issues = validate_config(config, env, require_credentials=require_credentials)
     errors = [i for i in issues if i.level == ERROR]
     if errors:
         raise ConfigError(errors)

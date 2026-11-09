@@ -66,6 +66,25 @@ def test_alpaca_requires_credentials_but_not_when_present():
     assert "env" not in errs(cfg, GOOD_ENV)
 
 
+def test_dashboard_mode_does_not_require_credentials():
+    """The read-only dashboard is deployed without broker keys (regression:
+    it crash-looped with exit 2 on a config that mirrors to Alpaca)."""
+    cfg = AppConfig(
+        data=DataConfig(provider="alpaca"),
+        execution=ExecutionConfig(mirror_to_alpaca=True),
+    )
+    issues = validate_config(cfg, {}, require_credentials=False)
+    assert "env" not in {i.path for i in issues if i.level == "error"}
+    ensure_valid(cfg, {}, require_credentials=False)
+    # The paper-only guard still applies without credentials.
+    live = {"ALPACA_PAPER": "false"}
+    assert "env.ALPACA_PAPER" in {
+        i.path for i in validate_config(cfg, live, require_credentials=False)
+    }
+    with pytest.raises(ConfigError):
+        ensure_valid(cfg, {})
+
+
 def test_live_alpaca_endpoint_is_rejected():
     env = {**GOOD_ENV, "APCA_API_BASE_URL": "https://api.alpaca.markets"}
     assert "env.APCA_API_BASE_URL" in errs(AppConfig(**SYNTH), env)

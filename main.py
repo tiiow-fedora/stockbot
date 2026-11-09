@@ -516,7 +516,9 @@ def main() -> None:
         sys.exit(1 if errors else 0)
     if args.command in ("run", "dashboard"):
         try:
-            for issue in ensure_valid(config):
+            # The dashboard is read-only and runs without the broker keys.
+            needs_keys = args.command == "run"
+            for issue in ensure_valid(config, require_credentials=needs_keys):
                 logger.warning("config: %s", issue)
         except ConfigError as exc:
             logger.error("%s", exc)
